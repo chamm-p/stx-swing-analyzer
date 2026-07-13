@@ -157,12 +157,20 @@ async def list_signals(symbol: str | None = None, limit: int = 50,
 
 @router.post("/signals/run/{symbol}")
 async def trigger_analysis(symbol: str, db: AsyncSession = Depends(get_db)):
-    """Manuelle Analyse eines Symbols (synchron — kann je nach LLM dauern)."""
-    item = await db.get(WatchlistItem, symbol.upper())
-    if not item:
-        raise HTTPException(status_code=404, detail="Nicht auf der Watchlist")
-    await yahoo.sync_ohlcv(db, symbol.upper())
-    signal = await run_for_symbol(db, symbol.upper())
+    """Manuelle Analyse eines Symbols (synchron — kann je nach LLM dauern).
+
+    Zulässig für die effektive Watchlist: manuelle Einträge UND offene
+    Positionen aus Portfolios mit aktivem „Beobachten"-Schalter."""
+    from app.analysis.watch_scope import effective_symbols
+
+    symbol = symbol.upper()
+    if symbol not in await effective_symbols(db):
+        raise HTTPException(
+            status_code=404,
+            detail="Weder auf der Watchlist noch in einem beobachteten Portfolio",
+        )
+    await yahoo.sync_ohlcv(db, symbol)
+    signal = await run_for_symbol(db, symbol)
     return {"created": signal is not None, "signal": _signal_dict(signal) if signal else None}
 
 

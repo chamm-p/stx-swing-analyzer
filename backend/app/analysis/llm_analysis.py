@@ -48,7 +48,12 @@ async def analyze_pending_sentiment(db: AsyncSession, llm: LLMClient, symbol: st
                 "article_id": str(article.id), "title": article.title, **data,
             }))
             done += 1
-        except (LLMError, ValueError, TypeError) as e:
+        except LLMError as e:
+            # Provider down / Key falsch: betrifft alle weiteren Artikel
+            # genauso — Lauf abbrechen statt pro Artikel 3x zu retrien.
+            logger.warning("Sentiment-Analyse abgebrochen (%s): LLM nicht verfügbar: %s", symbol, e)
+            break
+        except (ValueError, TypeError) as e:
             logger.warning("Sentiment-Analyse fehlgeschlagen (%s, %r): %s", symbol, article.title[:60], e)
     await db.commit()
     return done
