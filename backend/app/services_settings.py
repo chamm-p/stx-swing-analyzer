@@ -1,0 +1,120 @@
+"""Runtime-Einstellungen: DB-Overrides über Env-Defaults.
+
+Muster wie cura_llm's oidc_config: Secrets werden Fernet-verschlüsselt
+gespeichert (Feld ``<name>_enc``), im Save-Payload heißt „leer" =
+„gespeicherten Wert behalten" (Write-Only-Felder im UI). Nicht-Secret-
+Felder mit leerem String fallen auf den Env-Default zurück.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import logging
+
+from cryptography.fernet import Fernet, InvalidToken
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.models import AppSetting
+
+logger = logging.getLogger(__name__)
+
+_fernet: Fernet | None = None
+
+
+def _get_fernet() -> Fernet:
+    global _fernet
+    if _fernet is None:
+        digest = hashlib.sha256(get_settings().secret_key.encode()).digest()
+        _fernet = Fernet(base64.urlsafe_b64encode(digest))
+    return _fernet
+
+
+def encrypt_value(value: str) -> str:
+    return _get_fernet().encrypt(value.encode()).decode()
+
+
+def decrypt_value(token: str) -> str | None:
+    try:
+        return _get_fernet().decrypt(token.encode()).decode()
+    except (InvalidToken, Exception):  # SECRET_KEY geändert → Secret neu eingeben
+        logger.error("Settings-Secret nicht entschlüsselbar (SECRET_KEY geändert?)")
+        return None
+
+
+# Feld-Definitionen pro Settings-Key: (Env-Default-Attribut, is_secret)
+SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
+    "llm": {
+        "provider": ("llm_provider", False),
+        "base_url": ("llm_base_url", False),
+        "model": ("llm_model", False),
+        "api_key": ("llm_api_key", True),
+    },
+    "comm": {
+        "smtp_host": ("smtp_host", False),
+        "smtp_port": ("smtp_port", False),
+        "smtp_user": ("smtp_user", False),
+        "smtp_from": ("smtp_from", False),
+        "alert_email_to": ("alert_email_to", False),
+        "smtp_password": ("smtp_password", True),
+        "telegram_chat_id": ("telegram_chat_id", False),
+        "telegram_bot_token": ("telegram_bot_token", True),
+    },
+}
+
+
+async def load_settings(db: AsyncSession, key: str) -> dict:
+    """Effektive Konfiguration: DB-Override (falls gesetzt), sonst Env."""
+    env = get_settings()
+    schema = SCHEMAS[key]
+    row = await db.get(AppSetting, key)
+    stored = (row.value if row else {}) or {}
+
+    out: dict = {}
+    for field, (env_attr, is_secret) in schema.items():
+        if is_secret:
+            enc = stored.get(f"{field}_enc")
+            value = decrypt_value(enc) if enc else None
+            out[field] = value or getattr(env, env_attr)
+        else:
+            value = stored.get(field)
+            out[field] = value if value not in (None, "") else getattr(env, env_attr)
+    return out
+
+
+async def save_settings(db: AsyncSession, key: str, payload: dict) -> dict:
+    """Persistiert Overrides. Leere Secrets behalten den Bestand."""
+    schema = SCHEMAS[key]
+    row = await db.get(AppSetting, key)
+    stored = dict((row.value if row else {}) or {})
+
+    for field, (_env_attr, is_secret) in schema.items():
+        if field not in payload:
+            continue
+        value = payload[field]
+        if is_secret:
+            if value:  # leer = Bestand behalten
+                stored[f"{field}_enc"] = encrypt_value(str(value))
+        else:
+            stored[field] = "" if value is None else str(value)
+
+    if row is None:
+        row = AppSetting(key=key, value=stored)
+        db.add(row)
+    else:
+        row.value = stored
+    await db.commit()
+    return await load_settings(db, key)
+
+
+async def public_view(db: AsyncSession, key: str) -> dict:
+    """Effektive Werte OHNE Secret-Klartext (nur has_<feld>-Flags)."""
+    eff = await load_settings(db, key)
+    out: dict = {}
+    for field, (_env_attr, is_secret) in SCHEMAS[key].items():
+        if is_secret:
+            out[f"has_{field}"] = bool(eff.get(field))
+        else:
+            out[field] = eff.get(field)
+    return out

@@ -208,7 +208,7 @@ _TRANSLATE_SYSTEM = (
 
 
 @router.get("/assets/{symbol}/profile")
-async def asset_profile(symbol: str):
+async def asset_profile(symbol: str, db: AsyncSession = Depends(get_db)):
     """Unternehmensprofil (Sektor, Kennzahlen, Beschreibung) — Redis-gecacht.
 
     Ist ein LLM konfiguriert, wird die englische Yahoo-Beschreibung
@@ -216,9 +216,9 @@ async def asset_profile(symbol: str):
     """
     import json as _json
 
-    from app.config import get_settings
     from app.llm.client import LLMClient, LLMError
     from app.services_redis import get_redis
+    from app.services_settings import load_settings
 
     symbol = symbol.upper()
     r = get_redis()
@@ -233,9 +233,10 @@ async def asset_profile(symbol: str):
         raise HTTPException(status_code=502, detail=f"Profil für {symbol} nicht abrufbar: {e}")
     profile["symbol"] = symbol
 
-    if profile.get("summary") and get_settings().llm_api_key:
+    llm_cfg = await load_settings(db, "llm")
+    if profile.get("summary") and llm_cfg.get("api_key"):
         try:
-            profile["summary_de"] = await LLMClient().complete(
+            profile["summary_de"] = await LLMClient(llm_cfg).complete(
                 _TRANSLATE_SYSTEM, profile["summary"][:6000]
             )
         except LLMError as e:

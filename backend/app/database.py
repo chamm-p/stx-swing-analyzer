@@ -49,18 +49,30 @@ async def init_db() -> None:
         ))
 
         # Leichtgewichtige Spalten-Migrationen: create_all ergänzt keine
-        # Spalten an bestehenden Tabellen. Idempotent via IF NOT EXISTS.
-        for ddl in (
-            "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS cash DOUBLE PRECISION NOT NULL DEFAULT 0",
-            "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS config JSONB",
-            "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS watch_enabled BOOLEAN NOT NULL DEFAULT true",
-            "ALTER TABLE positions ADD COLUMN IF NOT EXISTS source VARCHAR(10) NOT NULL DEFAULT 'manual'",
-            "ALTER TABLE positions ADD COLUMN IF NOT EXISTS signal_id UUID",
-            "ALTER TABLE positions ADD COLUMN IF NOT EXISTS horizon_days INTEGER",
-            "ALTER TABLE signals ADD COLUMN IF NOT EXISTS eval_price DOUBLE PRECISION",
-            "ALTER TABLE signals ADD COLUMN IF NOT EXISTS eval_return_pct DOUBLE PRECISION",
-            "ALTER TABLE signals ADD COLUMN IF NOT EXISTS eval_hit BOOLEAN",
-            "ALTER TABLE signals ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ",
-        ):
-            await conn.execute(text(ddl))
+        # Spalten an bestehenden Tabellen. Erst prüfen, dann ALTER — ein
+        # ALTER braucht ACCESS EXCLUSIVE und würde bei jedem Start hinter
+        # laufenden Worker-Transaktionen hängen bleiben.
+        migrations = (
+            ("portfolios", "cash", "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+            ("portfolios", "config", "JSONB"),
+            ("portfolios", "watch_enabled", "BOOLEAN NOT NULL DEFAULT true"),
+            ("positions", "source", "VARCHAR(10) NOT NULL DEFAULT 'manual'"),
+            ("positions", "signal_id", "UUID"),
+            ("positions", "horizon_days", "INTEGER"),
+            ("signals", "eval_price", "DOUBLE PRECISION"),
+            ("signals", "eval_return_pct", "DOUBLE PRECISION"),
+            ("signals", "eval_hit", "BOOLEAN"),
+            ("signals", "evaluated_at", "TIMESTAMPTZ"),
+        )
+        existing = {
+            (row[0], row[1]) for row in (await conn.execute(text(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public'"
+            ))).all()
+        }
+        for table, column, ddl_type in migrations:
+            if (table, column) not in existing:
+                await conn.execute(text(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl_type}"
+                ))
     logger.info("DB-Schema initialisiert (Hypertables + Retention-Policies aktiv)")

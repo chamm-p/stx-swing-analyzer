@@ -28,15 +28,24 @@ class LLMError(RuntimeError):
 
 
 class LLMClient:
-    def __init__(self) -> None:
+    def __init__(self, cfg: dict | None = None) -> None:
+        """cfg: effektive Runtime-Config (services_settings.load_settings)
+        — ohne cfg gelten die Env-Defaults."""
         s = get_settings()
-        self.provider = s.llm_provider
-        self.base_url = s.llm_base_url.rstrip("/")
-        self.api_key = s.llm_api_key
-        self.model = s.llm_model
+        cfg = cfg or {}
+        self.provider = cfg.get("provider") or s.llm_provider
+        self.base_url = (cfg.get("base_url") or s.llm_base_url).rstrip("/")
+        self.api_key = cfg.get("api_key") or s.llm_api_key
+        self.model = cfg.get("model") or s.llm_model
         self.max_tokens = s.llm_max_tokens
         self.temperature = s.llm_temperature
         self.cache_ttl = s.llm_cache_ttl
+
+    @classmethod
+    async def create(cls, db) -> "LLMClient":
+        """Client mit UI-Einstellungen aus der DB (Fallback: Env)."""
+        from app.services_settings import load_settings
+        return cls(await load_settings(db, "llm"))
 
     # ------------------------------------------------------------------
     async def complete(self, system: str, user: str) -> str:

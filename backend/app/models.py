@@ -23,6 +23,16 @@ class Base(DeclarativeBase):
     pass
 
 
+class AppSetting(Base):
+    """Runtime-Einstellungen (UI-pflegbar). Überschreiben die Env-Defaults;
+    Secrets liegen Fernet-verschlüsselt in ``value`` (Suffix ``_enc``)."""
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONB, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class Asset(Base):
     __tablename__ = "assets"
 

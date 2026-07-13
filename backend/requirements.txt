@@ -12,3 +12,5 @@ apscheduler>=3.10,<4
 feedparser>=6.0
 yfinance>=0.2.40
 pandas>=2.2
+cryptography>=42.0
+

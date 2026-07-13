@@ -9,6 +9,7 @@ from app.api.portfolios import router as portfolio_router
 from app.api.review import router as review_router
 from app.api.routes import router as api_router
 from app.api.screener import router as screener_router
+from app.api.settings import router as settings_router
 from app.auth.routes import router as auth_router
 from app.database import init_db, SessionLocal
 from app.sources.rss import seed_default_sources
@@ -34,6 +35,7 @@ app.include_router(api_router)
 app.include_router(portfolio_router)
 app.include_router(review_router)
 app.include_router(screener_router)
+app.include_router(settings_router)
 
 
 @app.get("/api/health")

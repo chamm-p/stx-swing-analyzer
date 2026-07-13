@@ -126,7 +126,15 @@ die Pipeline manuell an.
 
 ## Konfiguration
 
-Alle Optionen in [.env.example](.env.example). Wichtigste Blöcke:
+**UI-Einstellungen** (Seite „Einstellungen"): LLM (Provider, Base-URL,
+API-Key, Modell — mit „Modelle laden" direkt vom Provider als
+Verbindungstest), E-Mail/SMTP, Telegram und die News-Datenquellen.
+UI-Werte liegen in der DB (Secrets Fernet-verschlüsselt mit dem
+`SECRET_KEY`), überschreiben die `.env`-Defaults sofort für Backend und
+Worker und lassen sich pro Sektion auf die `.env` zurücksetzen.
+Dark/Light-Theme ist über den Button im Topmenü umschaltbar.
+
+Alle weiteren Optionen in [.env.example](.env.example). Wichtigste Blöcke:
 
 | Block | Variablen |
 |---|---|

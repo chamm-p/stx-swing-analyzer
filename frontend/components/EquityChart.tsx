@@ -8,15 +8,17 @@ export default function EquityChart({ data }: { data: { time: string; value: num
 
   useEffect(() => {
     if (!containerRef.current || data.length === 0) return;
+    const light = document.documentElement.dataset.theme === "light";
+    const gridColor = light ? "#e2e8f0" : "#1e293b";
     const chart = createChart(containerRef.current, {
       height: 260,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#94a3b8",
+        textColor: light ? "#475569" : "#94a3b8",
       },
-      grid: { vertLines: { color: "#1e293b" }, horzLines: { color: "#1e293b" } },
-      timeScale: { borderColor: "#334155" },
-      rightPriceScale: { borderColor: "#334155" },
+      grid: { vertLines: { color: gridColor }, horzLines: { color: gridColor } },
+      timeScale: { borderColor: light ? "#cbd5e1" : "#334155" },
+      rightPriceScale: { borderColor: light ? "#cbd5e1" : "#334155" },
     });
     const first = data[0].value;
     const last = data[data.length - 1].value;

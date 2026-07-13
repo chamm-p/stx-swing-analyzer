@@ -11,7 +11,6 @@ from email.mime.text import MIMEText
 
 import httpx
 
-from app.config import get_settings
 from app.models import Asset, Signal
 
 logger = logging.getLogger(__name__)
@@ -30,47 +29,44 @@ def _format_message(signal: Signal, asset: Asset) -> str:
     )
 
 
-async def _send_telegram(text: str) -> None:
-    s = get_settings()
+async def send_telegram(comm: dict, text: str) -> None:
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
-            f"https://api.telegram.org/bot{s.telegram_bot_token}/sendMessage",
-            json={"chat_id": s.telegram_chat_id, "text": text},
+            f"https://api.telegram.org/bot{comm['telegram_bot_token']}/sendMessage",
+            json={"chat_id": comm["telegram_chat_id"], "text": text},
         )
         resp.raise_for_status()
 
 
-def _send_email_sync(subject: str, body: str) -> None:
-    s = get_settings()
+def send_email_sync(comm: dict, subject: str, body: str) -> None:
     msg = MIMEText(body, _charset="utf-8")
     msg["Subject"] = subject
-    msg["From"] = s.smtp_from or s.smtp_user
-    msg["To"] = s.alert_email_to
-    with smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=20) as server:
+    msg["From"] = comm.get("smtp_from") or comm.get("smtp_user")
+    msg["To"] = comm["alert_email_to"]
+    with smtplib.SMTP(comm["smtp_host"], int(comm.get("smtp_port") or 587), timeout=20) as server:
         server.starttls()
-        if s.smtp_user:
-            server.login(s.smtp_user, s.smtp_password)
+        if comm.get("smtp_user"):
+            server.login(comm["smtp_user"], comm.get("smtp_password") or "")
         server.send_message(msg)
 
 
-async def dispatch_signal_alert(signal: Signal, asset: Asset) -> None:
+async def dispatch_signal_alert(signal: Signal, asset: Asset, comm: dict) -> None:
     """Versendet über alle konfigurierten Kanäle; Fehler einzelner Kanäle
-    verhindern die anderen nicht."""
-    s = get_settings()
+    verhindern die anderen nicht. comm = services_settings.load_settings("comm")."""
     text = _format_message(signal, asset)
     sent = []
 
-    if s.telegram_bot_token and s.telegram_chat_id:
+    if comm.get("telegram_bot_token") and comm.get("telegram_chat_id"):
         try:
-            await _send_telegram(text)
+            await send_telegram(comm, text)
             sent.append("telegram")
         except Exception as e:
             logger.error("Telegram-Alert fehlgeschlagen: %s", e)
 
-    if s.smtp_host and s.alert_email_to:
+    if comm.get("smtp_host") and comm.get("alert_email_to"):
         try:
             subject = f"[stx] {signal.action} {asset.symbol} ({signal.confidence:.0%})"
-            await asyncio.to_thread(_send_email_sync, subject, text)
+            await asyncio.to_thread(send_email_sync, comm, subject, text)
             sent.append("email")
         except Exception as e:
             logger.error("E-Mail-Alert fehlgeschlagen: %s", e)

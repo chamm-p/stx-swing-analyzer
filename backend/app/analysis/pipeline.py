@@ -38,7 +38,7 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
     indicators = compute_indicators(df)
     snapshot = indicators["snapshot"]
 
-    llm = LLMClient()
+    llm = await LLMClient.create(db)
 
     # 1) Sentiment für neue Artikel
     await analyze_pending_sentiment(db, llm, symbol, asset.name)
@@ -101,7 +101,8 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
     if (signal.action in ("BUY", "SELL") and alert_enabled
             and signal.confidence >= min_confidence):
         try:
-            await dispatch_signal_alert(signal, asset)
+            from app.services_settings import load_settings
+            await dispatch_signal_alert(signal, asset, await load_settings(db, "comm"))
             signal.delivered = True
             await db.commit()
         except Exception as e:
