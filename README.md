@@ -1,0 +1,146 @@
+# STX Swing Analyzer
+
+Selbst-gehostete Plattform zur automatisierten Aggregation von Finanz-News und
+Börsendaten, LLM-basierter Analyse und **regelbasiertem Signal-Scoring** für
+Swing-Trading (Aktien/ETFs, Horizont 3–30 Tage).
+
+> ⚠️ **Keine Anlageberatung.** Die Plattform erzeugt automatisierte Signale
+> und Empfehlungen zu Analysezwecken. Keine Order-Ausführung.
+
+## Architektur
+
+```
+┌──────────┐   /api-Proxy   ┌──────────┐        ┌─────────────┐
+│ Frontend │ ─────────────▶ │ Backend  │ ─────▶ │ TimescaleDB │
+│ Next.js  │                │ FastAPI  │        │ (Hypertables│
+└──────────┘                └──────────┘        │  + Retention)│
+                                 │              └─────────────┘
+                            ┌──────────┐        ┌─────────────┐
+                            │  Worker  │ ─────▶ │    Redis    │
+                            │APScheduler│       │ Cache/State │
+                            └──────────┘        └─────────────┘
+```
+
+- **Backend** (FastAPI): REST-API, OIDC-Auth (übernommen aus cura_llm)
+- **Worker** (APScheduler): periodisches Fetching + Analyse-Pipeline
+- **TimescaleDB**: Hypertables für OHLCV & News mit Retention-Policies
+- **Redis**: LLM-Antwort-Cache, OIDC-State
+
+### Analyse-Pipeline (pro Watchlist-Symbol)
+
+1. **Data Collection** — Yahoo Finance (yfinance) für Tages-OHLCV, RSS-Feeds
+   für News (Retry mit exponentiellem Backoff, Dedupe per URL-Hash)
+2. **Indikatoren** — RSI(14, Wilder), MACD(12/26/9), Bollinger(20/2),
+   SMA 20/50/200 (pandas, ohne TA-Lib)
+3. **LLM-Analyse** — Sentiment pro Artikel + Asset-Review (fundamentale
+   Einschätzung, Risiken, Horizont) als strukturiertes JSON; Antworten
+   werden per Prompt-Hash in Redis gecacht
+4. **Signal-Scoring (regelbasiert, reproduzierbar)** —
+   `composite = 0.5·technisch + 0.3·sentiment + 0.2·fundamental`
+   (Gewichte per Env konfigurierbar). Composite ≥ Schwelle → BUY,
+   ≤ −Schwelle → SELL, sonst HOLD. Indikator-Snapshot und verwendetes
+   Profil werden am Signal gespeichert.
+
+   **Scoring-Profile pro Asset-Klasse** (`analysis/scoring.py`,
+   `PROFILES`): Krypto handelt 24/7 und volatiler als Aktien — darum
+   eigene Parameter:
+
+   | Parameter | Aktien/ETFs | Krypto | Grund |
+   |---|---|---|---|
+   | RSI überverkauft/-kauft | 30 / 70 | 25 / 75 | RSI erreicht bei Krypto schneller Extremwerte — sonst feuert Mean-Reversion zu früh |
+   | MACD-Normierung (hist/close ×) | 100 | 60 | Histogramm ist relativ zum Kurs größer — sonst sättigt die Komponente bei ±1 |
+   | BUY/SELL-Schwelle | `SCORE_THRESHOLD` (0.35) | `SCORE_THRESHOLD_CRYPTO` (0.45) | höheres Grundrauschen im 24/7-Markt |
+
+   Das Profil wird automatisch gewählt: im Screener über das
+   Universum-Segment, in der Watchlist-Pipeline über den Asset-Typ.
+5. **Alerts** — Telegram und/oder E-Mail bei neuen BUY/SELL-Signalen
+   (pro Asset abschaltbar, Confidence-Schwelle konfigurierbar)
+
+Signale werden dedupliziert: ein neues Signal entsteht nur bei
+Richtungswechsel oder nach Ablauf von `SIGNAL_REFRESH_HOURS`.
+
+### Universum-Screener (Top-Signale)
+
+Unabhängig von Watchlist und Portfolio scannt der Worker alle
+`SCAN_INTERVAL_MIN` (default 6h) ein konfigurierbares **Universum**
+(~110 Symbole in den Segmenten **US** (66), **DAX** (26) und
+**CRYPTO** (Top 20 als Yahoo-Ticker `BTC-USD`, `ETH-USD`, …), per API
+erweiterbar) — rein technisch, ohne LLM-Kosten. Die Seite
+**Top-Signale** zeigt die Bestenliste nach Signalstärke, filterbar nach
+Segment; von dort lassen sich Kandidaten in die Watchlist (→ volle
+LLM-Analyse) oder direkt in ein Portfolio übernehmen. Ziel: Kandidaten
+außerhalb des eigenen Bias sichtbar machen.
+
+### Portfolios
+
+Beliebig viele Portfolios, je als **echtes** Depot (laufende Positionen
+nachbilden) oder **Trial** (Papertrading zum Strategie-Testen).
+Positionen mit Stückzahl/Kaufkurs (leer = aktueller Kurs), Verkauf mit
+realisiertem P/L, Equity-Kurve aus den Tagesschlusskursen. Symbole aus
+offenen Positionen werden automatisch beim Kurs-Sync und bei den
+symbolbezogenen News-Feeds mitgetrackt.
+
+### News-Quellen
+
+Default-Feeds (per URL idempotent geseedet, in der UI verwaltbar):
+Yahoo Finance, MarketWatch, CNBC, Investing.com, Seeking Alpha,
+Handelsblatt, n-tv, tagesschau, Reddit r/stocks + r/wallstreetbets.
+Zusätzlich ruft der Worker pro getracktem Symbol den **symbolbezogenen
+Yahoo-Feed** ab (`feeds.finance.yahoo.com/rss/2.0/headline?s=…`) —
+diese Artikel sind direkt dem Symbol zugeordnet, ohne Keyword-Matching.
+
+## Quick Start
+
+```bash
+cp .env.example .env
+# .env editieren: POSTGRES_PASSWORD, SECRET_KEY, LLM_* setzen
+docker compose up -d --build
+```
+
+- Frontend: http://localhost:7800
+- Backend-API: http://localhost:7810/docs (Swagger)
+
+Erster Schritt im UI: unter **Watchlist** Symbole hinzufügen (Yahoo-Notation,
+z.B. `AAPL`, `SAP.DE`, `IWDA.AS`). Der Worker lädt dann Kursdaten, ordnet
+News zu und erzeugt Signale. „Jetzt analysieren" auf der Asset-Seite stößt
+die Pipeline manuell an.
+
+## Konfiguration
+
+Alle Optionen in [.env.example](.env.example). Wichtigste Blöcke:
+
+| Block | Variablen |
+|---|---|
+| Auth | `AUTH_MODE` (`none`/`oidc`), `OIDC_*`, `ALLOWED_EMAILS` |
+| LLM | `LLM_PROVIDER` (`openai`-kompatibel/`anthropic`), `LLM_BASE_URL`, `LLM_MODEL`, `LLM_CACHE_TTL` |
+| Scheduler | `FETCH_MARKET_INTERVAL_MIN`, `FETCH_NEWS_INTERVAL_MIN`, `ANALYZE_INTERVAL_MIN` |
+| Scoring | `SCORE_WEIGHT_*`, `SCORE_THRESHOLD`, `SIGNAL_REFRESH_HOURS` |
+| Retention | `RETENTION_OHLCV_DAYS` (730), `RETENTION_NEWS_DAYS` (365) |
+| Alerts | `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, `SMTP_*`, `ALERT_EMAIL_TO` |
+
+### OIDC (Produktion)
+
+`AUTH_MODE=oidc` setzen und `OIDC_DISCOVERY_URL` (Realm-/Provider-Basis-URL,
+`/.well-known/openid-configuration` wird automatisch ergänzt), `OIDC_CLIENT_ID`,
+`OIDC_CLIENT_SECRET` und `OIDC_REDIRECT_URI`
+(`https://<frontend-host>/api/auth/callback`) konfigurieren. Der Flow ist die
+Generic-OIDC-Implementierung aus cura_llm (JWKS-verifizierte ID-Tokens,
+State/Nonce-Replay-Schutz via Redis). `ALLOWED_EMAILS` wirkt als
+Single-User-Gate.
+
+## cura_llm-Reuse
+
+| Modul | Herkunft |
+|---|---|
+| `backend/app/auth/oidc_service.py` | 1:1 aus cura_llm (`services/oidc_service.py`) |
+| `backend/app/auth/oidc_config.py` | vereinfachte Env-Variante der cura_llm-Config |
+| `backend/app/llm/client.py` | schlanker Neuaufbau nach dem cura_llm-Provider-Muster (OpenAI-kompatibel + Anthropic) |
+
+## Roadmap / Phase 2
+
+- Abonnement-Datenquellen (konfigurierbare kostenpflichtige Streams)
+- WebPush als dritter Alert-Kanal (VAPID + Service Worker)
+- Reddit/X-Connectoren (API-Keys erforderlich)
+- Alpha-Vantage-Fallback für Kursdaten (Free-Tier: 25 Requests/Tag)
+- Backtesting-Framework
+- Alembic-Migrationen (aktuell `create_all` + idempotente Hypertable-Setups)

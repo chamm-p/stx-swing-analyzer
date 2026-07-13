@@ -1,0 +1,195 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { api } from "@/lib/api";
+import SignalBadge from "@/components/SignalBadge";
+
+type ScreenerRow = {
+  symbol: string;
+  name: string | null;
+  segment: string | null;
+  action: string;
+  technical_score: number;
+  close: number | null;
+  snapshot: Record<string, any> | null;
+};
+
+type TopResponse = { run_at: string | null; running: boolean; results: ScreenerRow[] };
+
+type PortfolioOption = { id: number; name: string; kind: string };
+
+const SEGMENTS = [
+  { key: null, label: "Alle" },
+  { key: "US", label: "US-Aktien" },
+  { key: "DAX", label: "DAX" },
+  { key: "CRYPTO", label: "Top Cryptos" },
+] as const;
+
+export default function TopSignalsPage() {
+  const [data, setData] = useState<TopResponse | null>(null);
+  const [segment, setSegment] = useState<string | null>(null);
+  const [portfolios, setPortfolios] = useState<PortfolioOption[]>([]);
+  const [targetPortfolio, setTargetPortfolio] = useState<number | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    const seg = segment ? `&segment=${segment}` : "";
+    api.get(`/api/screener/top?limit=30${seg}`).then(setData).catch((e) => setError(e.message));
+    api.get("/api/portfolios").then((p: PortfolioOption[]) => {
+      setPortfolios(p);
+      if (p.length > 0) setTargetPortfolio((cur) => cur ?? p[0].id);
+    }).catch(() => {});
+  }, [segment]);
+  useEffect(load, [load]);
+
+  async function runScan() {
+    setMsg(null);
+    try {
+      await api.post("/api/screener/run");
+      setMsg("Scan gestartet — Universum wird analysiert (dauert einige Minuten).");
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  async function toWatchlist(symbol: string) {
+    setMsg(null);
+    try {
+      await api.post("/api/watchlist", { symbol });
+      setMsg(`${symbol} zur Watchlist hinzugefügt — LLM-Analyse folgt im nächsten Lauf.`);
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  async function toPortfolio(row: ScreenerRow) {
+    if (targetPortfolio === null) {
+      setMsg("Zuerst ein Portfolio anlegen (Seite „Portfolios“).");
+      return;
+    }
+    const qty = window.prompt(`Stückzahl für ${row.symbol} (Kurs ~${row.close ?? "?"})`, "10");
+    if (!qty) return;
+    try {
+      const res = await api.post(`/api/portfolios/${targetPortfolio}/positions`, {
+        symbol: row.symbol,
+        quantity: parseFloat(qty.replace(",", ".")),
+      });
+      setMsg(`${row.symbol} gekauft zu ${res.entry_price} → Portfolio.`);
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  if (error) return <p className="text-rose-400">Fehler: {error}</p>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-xl font-bold">Top-Signale</h1>
+        <span className="text-xs text-slate-500">
+          Universum-Screener (rein technisch, unabhängig von Watchlist & Portfolio)
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          {portfolios.length > 0 && (
+            <select
+              value={targetPortfolio ?? ""}
+              onChange={(e) => setTargetPortfolio(Number(e.target.value))}
+              className="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs"
+            >
+              {portfolios.map((p) => (
+                <option key={p.id} value={p.id}>
+                  Ziel: {p.name} ({p.kind === "trial" ? "Trial" : "Echt"})
+                </option>
+              ))}
+            </select>
+          )}
+          <button onClick={runScan}
+            className="rounded bg-sky-600 px-3 py-1.5 text-sm font-semibold hover:bg-sky-500">
+            Scan starten
+          </button>
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        {SEGMENTS.map((s) => (
+          <button
+            key={s.label}
+            onClick={() => setSegment(s.key)}
+            className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+              segment === s.key
+                ? "border-sky-500 bg-sky-600/20 text-sky-300"
+                : "border-slate-700 text-slate-400 hover:border-slate-500"
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {data?.run_at && (
+        <p className="text-xs text-slate-500">
+          Letzter Scan: {new Date(data.run_at).toLocaleString("de-DE")}
+          {data.running && " — neuer Scan läuft…"}
+        </p>
+      )}
+      {msg && <p className="text-sm text-amber-400">{msg}</p>}
+
+      {!data ? (
+        <p className="text-slate-500">Lade…</p>
+      ) : data.results.length === 0 ? (
+        <p className="text-slate-500">
+          Noch kein Scan vorhanden — „Scan starten" klicken (der Worker scannt sonst automatisch alle 6h).
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-slate-800">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-900 text-left text-slate-400">
+              <tr>
+                <th className="px-3 py-2">#</th>
+                <th className="px-3 py-2">Symbol</th>
+                <th className="px-3 py-2">Segment</th>
+                <th className="px-3 py-2">Signal</th>
+                <th className="px-3 py-2">Tech-Score</th>
+                <th className="px-3 py-2">RSI</th>
+                <th className="px-3 py-2">Kurs</th>
+                <th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.results.map((r, i) => (
+                <tr key={r.symbol} className="border-t border-slate-800 hover:bg-slate-900/50">
+                  <td className="px-3 py-2 text-slate-500">{i + 1}</td>
+                  <td className="px-3 py-2">
+                    <Link href={`/asset/${r.symbol}`} className="font-semibold text-sky-400 hover:underline">
+                      {r.symbol}
+                    </Link>
+                    <span className="ml-2 text-xs text-slate-500">{r.name}</span>
+                  </td>
+                  <td className="px-3 py-2 text-slate-400">{r.segment}</td>
+                  <td className="px-3 py-2"><SignalBadge action={r.action} /></td>
+                  <td className={`px-3 py-2 font-mono ${r.technical_score > 0 ? "text-emerald-400" : r.technical_score < 0 ? "text-rose-400" : "text-slate-400"}`}>
+                    {r.technical_score > 0 ? "+" : ""}{r.technical_score.toFixed(2)}
+                  </td>
+                  <td className="px-3 py-2 text-slate-400">{r.snapshot?.rsi14?.toFixed(0) ?? "—"}</td>
+                  <td className="px-3 py-2">{r.close ?? "—"}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button onClick={() => toWatchlist(r.symbol)}
+                      className="mr-2 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-sky-500">
+                      → Watchlist
+                    </button>
+                    <button onClick={() => toPortfolio(r)}
+                      className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-emerald-500">
+                      → Portfolio
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
