@@ -53,6 +53,7 @@ async def init_db() -> None:
         for ddl in (
             "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS cash DOUBLE PRECISION NOT NULL DEFAULT 0",
             "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS config JSONB",
+            "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS watch_enabled BOOLEAN NOT NULL DEFAULT true",
             "ALTER TABLE positions ADD COLUMN IF NOT EXISTS source VARCHAR(10) NOT NULL DEFAULT 'manual'",
             "ALTER TABLE positions ADD COLUMN IF NOT EXISTS signal_id UUID",
             "ALTER TABLE positions ADD COLUMN IF NOT EXISTS horizon_days INTEGER",

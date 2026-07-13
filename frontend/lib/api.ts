@@ -62,4 +62,6 @@ export type WatchlistEntry = {
   min_confidence: number;
   notes: string | null;
   last_signal: Signal | null;
+  source: "watchlist" | "portfolio";
+  portfolios?: string[];
 };

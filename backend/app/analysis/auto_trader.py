@@ -23,7 +23,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Portfolio, Position, ScreenerResult, Signal, utcnow
-from app.sources.yahoo import latest_close
+from app.sources.yahoo import ensure_asset, latest_close
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +151,12 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
         price = await latest_close(db, symbol)
         if price is None or price <= 0:
             continue
+        try:
+            # Stammdaten anlegen (Name, Typ, News-Keywords), falls das
+            # Symbol nur aus dem Screener-Universum kommt
+            await ensure_asset(db, symbol)
+        except Exception as e:
+            logger.warning("Asset-Stammdaten für %s nicht ladbar: %s", symbol, e)
         budget = min(cfg["max_per_trade"], pf.cash)
         quantity = round(budget / price, 6)
         db.add(Position(

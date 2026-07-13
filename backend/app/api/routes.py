@@ -39,30 +39,54 @@ class WatchlistUpdate(BaseModel):
 
 @router.get("/watchlist")
 async def get_watchlist(db: AsyncSession = Depends(get_db)):
+    """Manuelle Einträge + abgeleitete Symbole aus beobachteten Portfolios."""
+    from app.analysis.watch_scope import DERIVED_MIN_CONFIDENCE, derived_symbols
+
+    async def entry(symbol: str, asset: Asset | None, base: dict) -> dict:
+        last_signal = await db.scalar(
+            select(Signal).where(Signal.symbol == symbol).order_by(desc(Signal.ts)).limit(1)
+        )
+        last_news = await db.scalar(
+            select(func.max(NewsArticle.published_at)).where(NewsArticle.symbols.any(symbol))
+        )
+        return {
+            "symbol": symbol,
+            "name": asset.name if asset else None,
+            "asset_type": asset.asset_type if asset else "stock",
+            "currency": asset.currency if asset else None,
+            "last_news_at": last_news,
+            "last_signal": _signal_dict(last_signal) if last_signal else None,
+            **base,
+        }
+
     result = await db.execute(
         select(WatchlistItem, Asset).join(Asset, Asset.symbol == WatchlistItem.symbol)
         .order_by(WatchlistItem.added_at)
     )
     out = []
+    manual_symbols = set()
     for item, asset in result.all():
-        last_signal = await db.scalar(
-            select(Signal).where(Signal.symbol == item.symbol).order_by(desc(Signal.ts)).limit(1)
-        )
-        last_close = await db.scalar(
-            select(func.max(NewsArticle.published_at)).where(NewsArticle.symbols.any(item.symbol))
-        )
-        out.append({
-            "symbol": item.symbol,
-            "name": asset.name,
-            "asset_type": asset.asset_type,
-            "currency": asset.currency,
+        manual_symbols.add(item.symbol)
+        out.append(await entry(item.symbol, asset, {
+            "source": "watchlist",
             "alert_enabled": item.alert_enabled,
             "min_confidence": item.min_confidence,
             "notes": item.notes,
             "added_at": item.added_at,
-            "last_news_at": last_close,
-            "last_signal": _signal_dict(last_signal) if last_signal else None,
-        })
+        }))
+
+    for symbol, pf_names in (await derived_symbols(db)).items():
+        if symbol in manual_symbols:
+            continue
+        asset = await db.get(Asset, symbol)
+        out.append(await entry(symbol, asset, {
+            "source": "portfolio",
+            "portfolios": pf_names,
+            "alert_enabled": True,
+            "min_confidence": DERIVED_MIN_CONFIDENCE,
+            "notes": None,
+            "added_at": None,
+        }))
     return out
 
 
@@ -303,8 +327,10 @@ async def delete_source(source_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/dashboard")
 async def dashboard(db: AsyncSession = Depends(get_db)):
+    from app.analysis.watch_scope import effective_symbols
+
     signals = await db.execute(select(Signal).order_by(desc(Signal.ts)).limit(20))
-    watch_count = await db.scalar(select(func.count()).select_from(WatchlistItem))
+    watch_count = len(await effective_symbols(db))
     news_24h = await db.scalar(
         select(func.count()).select_from(NewsArticle)
         .where(NewsArticle.published_at >= datetime.now(timezone.utc) - timedelta(hours=24))

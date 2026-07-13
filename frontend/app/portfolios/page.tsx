@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 type PortfolioSummary = {
   id: number; name: string; kind: string; open_positions: number;
   invested: number; value: number; pnl_abs: number; pnl_pct: number; realized_pnl: number;
+  watch_enabled: boolean;
   cash?: number; total_value?: number; total_pnl_abs?: number; total_pnl_pct?: number;
   config?: Record<string, any>;
 };
@@ -50,6 +51,11 @@ export default function PortfoliosPage() {
     } catch (err: any) {
       setError(err.message);
     }
+  }
+
+  async function toggleWatch(p: PortfolioSummary) {
+    await api.patch(`/api/portfolios/${p.id}`, { watch_enabled: !p.watch_enabled });
+    load();
   }
 
   async function remove(p: PortfolioSummary) {
@@ -130,7 +136,14 @@ export default function PortfoliosPage() {
                 <div className="text-xs text-slate-500">Positionen</div>
               </div>
             </div>
-            <div className="mt-3 flex items-center text-xs text-slate-500">
+            <div className="mt-3 flex items-center gap-3 text-xs text-slate-500">
+              <button
+                onClick={() => toggleWatch(p)}
+                title="Offene Positionen automatisch analysieren (Watchlist, Signale, Dashboard)"
+                className={`rounded border px-2 py-1 ${p.watch_enabled ? "border-emerald-700 text-emerald-400" : "border-slate-700"}`}
+              >
+                Beobachten {p.watch_enabled ? "an" : "aus"}
+              </button>
               {p.realized_pnl !== 0 && (
                 <span>Realisiert: {p.realized_pnl >= 0 ? "+" : ""}{p.realized_pnl.toLocaleString("de-DE")}</span>
               )}

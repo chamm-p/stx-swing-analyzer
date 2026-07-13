@@ -112,6 +112,9 @@ class Portfolio(Base):
     #  use_screener, enabled)
     cash: Mapped[float] = mapped_column(Float, default=0.0)
     config: Mapped[dict | None] = mapped_column(JSONB)
+    # Offene Positionen automatisch wie Watchlist-Einträge behandeln
+    # (Analyse-Pipeline, Dashboard, abgeleitete Watchlist-Anzeige)
+    watch_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

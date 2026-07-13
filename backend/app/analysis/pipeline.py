@@ -14,9 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.alerts.dispatcher import dispatch_signal_alert
 from app.analysis.llm_analysis import analyze_pending_sentiment, asset_review, recent_scored_articles
 from app.analysis.scoring import aggregate_sentiment, score_signal
+from app.analysis.watch_scope import alert_config, effective_symbols
 from app.config import get_settings
 from app.llm.client import LLMClient, LLMError
-from app.models import Asset, Signal, WatchlistItem, utcnow
+from app.models import Asset, Signal, utcnow
 from app.processing.indicators import compute_indicators
 from app.sources.yahoo import load_ohlcv_df
 
@@ -94,10 +95,11 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
     logger.info("Signal %s: %s (Confidence %.2f, Composite %.2f)",
                 symbol, result.action, result.confidence, result.composite)
 
-    # 5) Alert (nur BUY/SELL, nur wenn aktiviert und Confidence-Schwelle erreicht)
-    item = await db.get(WatchlistItem, symbol)
-    if (signal.action in ("BUY", "SELL") and item and item.alert_enabled
-            and signal.confidence >= item.min_confidence):
+    # 5) Alert (nur BUY/SELL; Config aus Watchlist-Eintrag oder
+    #    Portfolio-Ableitung mit Defaults)
+    alert_enabled, min_confidence = await alert_config(db, symbol)
+    if (signal.action in ("BUY", "SELL") and alert_enabled
+            and signal.confidence >= min_confidence):
         try:
             await dispatch_signal_alert(signal, asset)
             signal.delivered = True
@@ -109,8 +111,7 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
 
 
 async def run_all(db: AsyncSession) -> int:
-    result = await db.execute(select(WatchlistItem.symbol))
-    symbols = [row[0] for row in result.all()]
+    symbols = await effective_symbols(db)
     count = 0
     for symbol in symbols:
         try:

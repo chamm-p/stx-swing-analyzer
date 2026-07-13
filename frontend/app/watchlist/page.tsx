@@ -79,17 +79,30 @@ export default function WatchlistPage() {
                 <SignalBadge action={item.last_signal.action} confidence={item.last_signal.confidence} />
               )}
             </div>
+            {item.source === "portfolio" && (
+              <div className="mt-2 text-xs text-sky-400/80">
+                aus Portfolio: {item.portfolios?.join(", ")}
+              </div>
+            )}
             <div className="mt-3 flex items-center gap-3 text-xs text-slate-400">
-              <button
-                onClick={() => toggleAlert(item)}
-                className={`rounded border px-2 py-1 ${item.alert_enabled ? "border-emerald-700 text-emerald-400" : "border-slate-700"}`}
-              >
-                Alerts {item.alert_enabled ? "an" : "aus"}
-              </button>
-              <span>min. Confidence {Math.round(item.min_confidence * 100)}%</span>
-              <button onClick={() => remove(item.symbol)} className="ml-auto text-rose-400 hover:underline">
-                Entfernen
-              </button>
+              {item.source === "watchlist" ? (
+                <>
+                  <button
+                    onClick={() => toggleAlert(item)}
+                    className={`rounded border px-2 py-1 ${item.alert_enabled ? "border-emerald-700 text-emerald-400" : "border-slate-700"}`}
+                  >
+                    Alerts {item.alert_enabled ? "an" : "aus"}
+                  </button>
+                  <span>min. Confidence {Math.round(item.min_confidence * 100)}%</span>
+                  <button onClick={() => remove(item.symbol)} className="ml-auto text-rose-400 hover:underline">
+                    Entfernen
+                  </button>
+                </>
+              ) : (
+                <span className="text-slate-500">
+                  Automatisch beobachtet — abschaltbar über den „Beobachten"-Schalter am Portfolio
+                </span>
+              )}
             </div>
           </div>
         ))}

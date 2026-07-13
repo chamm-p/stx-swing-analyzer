@@ -44,6 +44,12 @@ class PositionClose(BaseModel):
     exit_price: float | None = Field(default=None, gt=0)
 
 
+class PortfolioUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    watch_enabled: bool | None = None
+    config: AutoConfig | None = None
+
+
 def _position_dict(p: Position, current: float | None) -> dict:
     return {
         "id": str(p.id), "symbol": p.symbol, "quantity": p.quantity,
@@ -72,6 +78,7 @@ async def _portfolio_summary(db: AsyncSession, portfolio: Portfolio) -> dict:
             realized += pv["pnl_abs"]
     out = {
         "id": portfolio.id, "name": portfolio.name, "kind": portfolio.kind,
+        "watch_enabled": portfolio.watch_enabled,
         "created_at": portfolio.created_at,
         "open_positions": open_count,
         "invested": round(invested, 2),
@@ -110,6 +117,22 @@ async def create_portfolio(payload: PortfolioCreate, db: AsyncSession = Depends(
     db.add(portfolio)
     await db.commit()
     return {"id": portfolio.id, "ok": True}
+
+
+@router.patch("/portfolios/{portfolio_id}")
+async def update_portfolio(portfolio_id: int, payload: PortfolioUpdate,
+                           db: AsyncSession = Depends(get_db)):
+    portfolio = await db.get(Portfolio, portfolio_id)
+    if not portfolio:
+        raise HTTPException(status_code=404, detail="Portfolio nicht gefunden")
+    if payload.name is not None:
+        portfolio.name = payload.name.strip()
+    if payload.watch_enabled is not None:
+        portfolio.watch_enabled = payload.watch_enabled
+    if payload.config is not None and portfolio.kind == "auto":
+        portfolio.config = payload.config.model_dump()
+    await db.commit()
+    return {"ok": True}
 
 
 @router.delete("/portfolios/{portfolio_id}")
