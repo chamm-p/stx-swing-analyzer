@@ -42,6 +42,8 @@ class PositionCreate(BaseModel):
 
 class PositionClose(BaseModel):
     exit_price: float | None = Field(default=None, gt=0)
+    # None oder >= Bestand = Komplettverkauf; sonst Teilverkauf
+    quantity: float | None = Field(default=None, gt=0)
 
 
 class PortfolioUpdate(BaseModel):
@@ -229,6 +231,11 @@ async def add_position(portfolio_id: int, payload: PositionCreate,
 @router.post("/positions/{position_id}/close")
 async def close_position(position_id: uuid.UUID, payload: PositionClose,
                          db: AsyncSession = Depends(get_db)):
+    """Verkauf — komplett oder stückweise.
+
+    Teilverkauf: Die verkaufte Menge wird als eigene, geschlossene
+    Position abgespalten (Einstiegsdaten bleiben erhalten → korrektes
+    realisiertes P/L), der Rest bleibt offen."""
     position = await db.get(Position, position_id)
     if not position:
         raise HTTPException(status_code=404, detail="Position nicht gefunden")
@@ -237,10 +244,37 @@ async def close_position(position_id: uuid.UUID, payload: PositionClose,
     exit_price = payload.exit_price or await yahoo.latest_close(db, position.symbol)
     if exit_price is None:
         raise HTTPException(status_code=422, detail="Kein Kurs verfügbar — exit_price angeben")
-    position.exit_price = exit_price
-    position.exit_date = utcnow()
+
+    sell_qty = payload.quantity
+    partial = sell_qty is not None and sell_qty < position.quantity
+    now = utcnow()
+
+    if partial:
+        sold = Position(
+            portfolio_id=position.portfolio_id, symbol=position.symbol,
+            quantity=sell_qty, entry_price=position.entry_price,
+            entry_date=position.entry_date, exit_price=exit_price, exit_date=now,
+            source=position.source, signal_id=position.signal_id,
+            horizon_days=position.horizon_days,
+            target_price=position.target_price, stop_price=position.stop_price,
+            notes=f"{position.notes or ''} | Teilverkauf {sell_qty} von {position.quantity}".strip(" |"),
+        )
+        db.add(sold)
+        position.quantity = round(position.quantity - sell_qty, 6)
+        sold_quantity = sell_qty
+    else:
+        position.exit_price = exit_price
+        position.exit_date = now
+        sold_quantity = position.quantity
+
+    # Auto-Portfolios führen Cash — Verkaufserlös gutschreiben
+    portfolio = await db.get(Portfolio, position.portfolio_id)
+    if portfolio and portfolio.kind == "auto":
+        portfolio.cash += exit_price * sold_quantity
+
     await db.commit()
-    return {"ok": True, "exit_price": exit_price}
+    return {"ok": True, "exit_price": exit_price, "sold_quantity": sold_quantity,
+            "remaining": position.quantity if partial else 0}
 
 
 @router.delete("/positions/{position_id}")

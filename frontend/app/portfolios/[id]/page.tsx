@@ -69,9 +69,24 @@ export default function PortfolioDetailPage() {
   }
 
   async function closePosition(p: PositionRow) {
+    const qtyInput = window.prompt(
+      `Wie viele Stück von ${p.symbol} verkaufen? (Bestand: ${p.quantity})`,
+      String(p.quantity)
+    );
+    if (qtyInput === null) return;
+    const qty = parseFloat(qtyInput.replace(",", "."));
+    if (!qty || qty <= 0) return;
     const px = window.prompt(`Verkaufskurs für ${p.symbol} (leer = aktueller Kurs ${p.current_price ?? "?"})`, "");
+    if (px === null) return;
     try {
-      await api.post(`/api/positions/${p.id}/close`, { exit_price: px ? parseFloat(px.replace(",", ".")) : null });
+      const res = await api.post(`/api/positions/${p.id}/close`, {
+        quantity: qty,
+        exit_price: px ? parseFloat(px.replace(",", ".")) : null,
+      });
+      setError(null);
+      if (res.remaining > 0) {
+        alert(`${res.sold_quantity} Stück zu ${res.exit_price} verkauft — ${res.remaining} bleiben offen.`);
+      }
       load();
     } catch (err: any) {
       setError(err.message);
