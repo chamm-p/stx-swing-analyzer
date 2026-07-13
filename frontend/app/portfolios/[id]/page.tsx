@@ -11,13 +11,14 @@ type PositionRow = {
   exit_price: number | null; exit_date: string | null; is_open: boolean;
   current_price: number | null; value: number | null; invested: number;
   pnl_abs: number | null; pnl_pct: number | null; notes: string | null;
-  source: string; horizon_days: number | null;
+  source: string; horizon_days: number | null; fees: number;
 };
 
 type Detail = {
   summary: {
     id: number; name: string; kind: string; invested: number; value: number;
     pnl_abs: number; pnl_pct: number; realized_pnl: number; open_positions: number;
+    platform_id: number | null; platform_name: string | null; fees_total: number;
   };
   positions: PositionRow[];
 };
@@ -113,13 +114,15 @@ export default function PortfolioDetailPage() {
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
         <Stat label="Aktueller Wert" value={fmtNum(s.value)} />
         <Stat label="Investiert" value={fmtNum(s.invested)} />
         <Stat label="Unrealisiert" value={`${s.pnl_abs >= 0 ? "+" : ""}${fmtNum(s.pnl_abs)} (${s.pnl_pct.toFixed(1)}%)`}
           tone={s.pnl_abs >= 0 ? "pos" : "neg"} />
         <Stat label="Realisiert" value={`${s.realized_pnl >= 0 ? "+" : ""}${fmtNum(s.realized_pnl)}`}
           tone={s.realized_pnl >= 0 ? "pos" : "neg"} />
+        <Stat label={`Gebühren${s.platform_name ? ` (${s.platform_name})` : ""}`}
+          value={fmtNum(s.fees_total)} tone={s.fees_total > 0 ? "neg" : undefined} />
         <Stat label="Offene Positionen" value={String(s.open_positions)} />
       </div>
 
@@ -172,8 +175,10 @@ export default function PortfolioDetailPage() {
                 </td>
                 <td className="px-3 py-2">{p.current_price?.toFixed(2) ?? "—"}</td>
                 <td className="px-3 py-2">{p.value !== null ? fmtNum(p.value) : "—"}</td>
-                <td className={`px-3 py-2 font-mono ${(p.pnl_abs ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                <td className={`px-3 py-2 font-mono ${(p.pnl_abs ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}
+                  title={p.fees > 0 ? `inkl. ${p.fees.toFixed(2)} Gebühren` : undefined}>
                   {p.pnl_abs !== null ? `${p.pnl_abs >= 0 ? "+" : ""}${fmtNum(p.pnl_abs)} (${p.pnl_pct}%)` : "—"}
+                  {p.fees > 0 && <span className="ml-1 text-xs text-slate-500">*</span>}
                 </td>
                 <td className="px-3 py-2 text-xs text-slate-400">
                   {p.is_open ? "offen" : `verkauft ${p.exit_date ? new Date(p.exit_date).toLocaleDateString("de-DE") : ""}`}

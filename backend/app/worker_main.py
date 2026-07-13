@@ -26,6 +26,8 @@ async def main() -> None:
     async with SessionLocal() as db:
         await seed_default_sources(db)
         await seed_universe(db)
+        from app.analysis.fees import seed_platforms
+        await seed_platforms(db)
         has_scan = await db.scalar(select(ScreenerResult.id).limit(1))
 
     scheduler = build_scheduler()

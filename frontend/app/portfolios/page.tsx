@@ -8,6 +8,7 @@ type PortfolioSummary = {
   id: number; name: string; kind: string; open_positions: number;
   invested: number; value: number; pnl_abs: number; pnl_pct: number; realized_pnl: number;
   watch_enabled: boolean;
+  platform_id: number | null; platform_name: string | null; fees_total: number;
   cash?: number; total_value?: number; total_pnl_abs?: number; total_pnl_pct?: number;
   config?: Record<string, any>;
 };
@@ -22,11 +23,14 @@ export default function PortfoliosPage() {
   const [portfolios, setPortfolios] = useState<PortfolioSummary[]>([]);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"real" | "trial" | "auto">("real");
+  const [platforms, setPlatforms] = useState<{ id: number; name: string }[]>([]);
+  const [platformId, setPlatformId] = useState<number | "">("");
   const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", use_screener: true });
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     api.get("/api/portfolios").then(setPortfolios).catch((e) => setError(e.message));
+    api.get("/api/platforms").then(setPlatforms).catch(() => {});
   }, []);
   useEffect(load, [load]);
 
@@ -34,7 +38,7 @@ export default function PortfoliosPage() {
     e.preventDefault();
     if (!name.trim()) return;
     try {
-      const body: any = { name: name.trim(), kind };
+      const body: any = { name: name.trim(), kind, platform_id: platformId === "" ? null : platformId };
       if (kind === "auto") {
         body.config = {
           start_capital: parseFloat(cfg.start_capital.replace(",", ".")),
@@ -78,6 +82,12 @@ export default function PortfoliosPage() {
             <option value="real">Echtes Portfolio</option>
             <option value="trial">Trial (Strategie-Test)</option>
             <option value="auto">Auto (System handelt selbst)</option>
+          </select>
+          <select value={platformId} onChange={(e) => setPlatformId(e.target.value === "" ? "" : Number(e.target.value))}
+            title="Handelsplattform — deren Gebührenstaffel wird bei Käufen/Verkäufen gebucht"
+            className="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
+            <option value="">ohne Gebühren</option>
+            {platforms.map((p) => <option key={p.id} value={p.id}>Gebühren: {p.name}</option>)}
           </select>
           <button className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">Anlegen</button>
         </div>
@@ -136,6 +146,12 @@ export default function PortfoliosPage() {
                 <div className="text-xs text-slate-500">Positionen</div>
               </div>
             </div>
+            {(p.platform_name || p.fees_total > 0) && (
+              <div className="mt-2 text-xs text-slate-500">
+                {p.platform_name && <>Gebühren: {p.platform_name}</>}
+                {p.fees_total > 0 && <> · bisher {p.fees_total.toLocaleString("de-DE")} gezahlt</>}
+              </div>
+            )}
             <div className="mt-3 flex items-center gap-3 text-xs text-slate-500">
               <button
                 onClick={() => toggleWatch(p)}

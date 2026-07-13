@@ -37,8 +37,151 @@ export default function SettingsPage() {
       </p>
       {llm && <LlmSection initial={llm} onSaved={load} />}
       {comm && <CommSection initial={comm} onSaved={load} />}
+      <PlatformsSection />
       <McpSection />
       <SourcesSection />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------- Handelsplattformen */
+
+type FeeTier = { up_to: number | null; fee: number };
+type Platform = { id: number; name: string; fees: Record<string, FeeTier[]> };
+
+function PlatformsSection() {
+  const [platforms, setPlatforms] = useState<Platform[]>([]);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    api.get("/api/platforms").then(setPlatforms).catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  async function addPlatform() {
+    const name = window.prompt("Name der Plattform (z.B. Interactive Brokers)?");
+    if (!name?.trim()) return;
+    await api.post("/api/platforms", {
+      name: name.trim(),
+      fees: { default: [{ up_to: null, fee: 0 }] },
+    });
+    load();
+  }
+
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <div className="mb-1 flex items-center gap-3">
+        <h2 className="font-semibold">💰 Handelsplattformen (Gebühren)</h2>
+        <button onClick={addPlatform}
+          className="ml-auto rounded border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-sky-500">
+          + Plattform
+        </button>
+      </div>
+      <p className="mb-3 text-xs text-slate-500">
+        Gebührenstaffeln je Transaktionsvolumen; Käufe/Verkäufe (auch Auto-Portfolio) buchen die
+        Gebühr automatisch ins P/L. Portfolios wählen ihre Plattform auf der Portfolios-Seite.
+        Staffeln gelten je Währungsgruppe — „default" greift, wenn keine passende Währung definiert ist.
+      </p>
+      {msg && <p className="mb-2 text-sm text-amber-400">{msg}</p>}
+      <div className="space-y-3">
+        {platforms.map((p) => (
+          <PlatformEditor key={p.id} platform={p} onChanged={load} onMsg={setMsg} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PlatformEditor({ platform, onChanged, onMsg }: {
+  platform: Platform; onChanged: () => void; onMsg: (m: string) => void;
+}) {
+  const [name, setName] = useState(platform.name);
+  const [fees, setFees] = useState<Record<string, FeeTier[]>>(platform.fees || {});
+  const groups = Object.keys(fees);
+  const [group, setGroup] = useState(groups[0] || "default");
+  const tiers = fees[group] || [];
+
+  function setTier(i: number, field: "up_to" | "fee", raw: string) {
+    const next = tiers.map((t, idx) => idx === i ? {
+      ...t,
+      [field]: raw === "" ? (field === "up_to" ? null : 0) : parseFloat(raw.replace(",", ".")),
+    } : t);
+    setFees({ ...fees, [group]: next });
+  }
+
+  async function save() {
+    try {
+      await api.put(`/api/platforms/${platform.id}`, { name: name.trim(), fees });
+      onMsg(`✅ ${name} gespeichert.`);
+      onChanged();
+    } catch (e: any) {
+      onMsg(`❌ ${e.message}`);
+    }
+  }
+
+  async function remove() {
+    if (!confirm(`Plattform "${platform.name}" löschen? Portfolios verlieren ihre Gebührenzuordnung.`)) return;
+    await api.del(`/api/platforms/${platform.id}`);
+    onChanged();
+  }
+
+  function addGroup() {
+    const code = window.prompt("Währungscode für eigene Staffel (z.B. EUR, GBP)?");
+    if (!code?.trim()) return;
+    const key = code.trim().toUpperCase();
+    setFees({ ...fees, [key]: fees[key] || [{ up_to: null, fee: 0 }] });
+    setGroup(key);
+  }
+
+  return (
+    <div className="rounded border border-slate-800 bg-slate-900/40 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={name} onChange={(e) => setName(e.target.value)}
+          className="w-56 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm font-semibold" />
+        <div className="flex items-center gap-1">
+          {groups.map((g) => (
+            <button key={g} onClick={() => setGroup(g)}
+              className={`rounded-full border px-2 py-0.5 text-xs ${g === group ? "border-sky-500 text-sky-400" : "border-slate-700 text-slate-400"}`}>
+              {g}
+            </button>
+          ))}
+          <button onClick={addGroup} title="Währungsgruppe mit eigener Staffel ergänzen"
+            className="rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-500 hover:border-slate-500">+</button>
+        </div>
+        <button onClick={save} className="ml-auto rounded bg-sky-600 px-3 py-1 text-xs font-semibold hover:bg-sky-500">
+          Speichern
+        </button>
+        <button onClick={remove} className="rounded border border-slate-700 px-2 py-1 text-xs text-rose-400 hover:border-rose-500">
+          Löschen
+        </button>
+      </div>
+      <table className="mt-2 text-xs">
+        <thead className="text-slate-500">
+          <tr><th className="pr-4 text-left">Volumen bis (leer = darüber)</th><th className="pr-4 text-left">Gebühr</th><th /></tr>
+        </thead>
+        <tbody>
+          {tiers.map((t, i) => (
+            <tr key={i}>
+              <td className="pr-4 py-0.5">
+                <input value={t.up_to ?? ""} onChange={(e) => setTier(i, "up_to", e.target.value)}
+                  placeholder="∞" className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-1" />
+              </td>
+              <td className="pr-4 py-0.5">
+                <input value={t.fee} onChange={(e) => setTier(i, "fee", e.target.value)}
+                  className="w-20 rounded border border-slate-700 bg-slate-900 px-2 py-1" />
+              </td>
+              <td>
+                <button onClick={() => setFees({ ...fees, [group]: tiers.filter((_, idx) => idx !== i) })}
+                  className="text-rose-400 hover:underline">✕</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button onClick={() => setFees({ ...fees, [group]: [...tiers, { up_to: null, fee: 0 }] })}
+        className="mt-1 rounded border border-slate-700 px-2 py-0.5 text-xs text-slate-400 hover:border-slate-500">
+        + Stufe
+      </button>
     </div>
   );
 }

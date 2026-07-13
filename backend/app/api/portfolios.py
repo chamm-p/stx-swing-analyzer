@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.analysis.portfolio_calc import equity_curve, position_value
 from app.auth.deps import require_user
 from app.database import get_db
-from app.models import Portfolio, Position, utcnow
+from app.models import Asset, Portfolio, Position, TradingPlatform, utcnow
 from app.sources import yahoo
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ class AutoConfig(BaseModel):
 class PortfolioCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     kind: str = Field(default="real", pattern="^(real|trial|auto)$")
+    platform_id: int | None = None
     config: AutoConfig | None = None
 
 
@@ -49,7 +50,50 @@ class PositionClose(BaseModel):
 class PortfolioUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     watch_enabled: bool | None = None
+    platform_id: int | None = None  # -1 = Plattform entfernen
     config: AutoConfig | None = None
+
+
+# ------------------------------------------------------------- Plattformen
+
+class PlatformPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    fees: dict = Field(default_factory=dict)
+
+
+@router.get("/platforms")
+async def list_platforms(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(TradingPlatform).order_by(TradingPlatform.id))
+    return [{"id": p.id, "name": p.name, "fees": p.fees} for p in result.scalars().all()]
+
+
+@router.post("/platforms", status_code=201)
+async def create_platform(payload: PlatformPayload, db: AsyncSession = Depends(get_db)):
+    platform = TradingPlatform(name=payload.name.strip(), fees=payload.fees)
+    db.add(platform)
+    await db.commit()
+    return {"id": platform.id, "ok": True}
+
+
+@router.put("/platforms/{platform_id}")
+async def update_platform(platform_id: int, payload: PlatformPayload,
+                          db: AsyncSession = Depends(get_db)):
+    platform = await db.get(TradingPlatform, platform_id)
+    if not platform:
+        raise HTTPException(status_code=404, detail="Plattform nicht gefunden")
+    platform.name = payload.name.strip()
+    platform.fees = payload.fees
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/platforms/{platform_id}")
+async def delete_platform(platform_id: int, db: AsyncSession = Depends(get_db)):
+    platform = await db.get(TradingPlatform, platform_id)
+    if platform:
+        await db.delete(platform)  # Portfolios: platform_id -> NULL (FK)
+        await db.commit()
+    return {"ok": True}
 
 
 def _position_dict(p: Position, current: float | None) -> dict:
@@ -66,11 +110,12 @@ def _position_dict(p: Position, current: float | None) -> dict:
 async def _portfolio_summary(db: AsyncSession, portfolio: Portfolio) -> dict:
     result = await db.execute(select(Position).where(Position.portfolio_id == portfolio.id))
     positions = result.scalars().all()
-    value = invested = realized = 0.0
+    value = invested = realized = fees_total = 0.0
     open_count = 0
     for p in positions:
         current = await yahoo.latest_close(db, p.symbol) if p.exit_date is None else None
         pv = position_value(p, current)
+        fees_total += pv["fees"]
         if p.exit_date is None:
             open_count += 1
             invested += pv["invested"]
@@ -78,9 +123,13 @@ async def _portfolio_summary(db: AsyncSession, portfolio: Portfolio) -> dict:
                 value += pv["value"]
         elif pv["pnl_abs"] is not None:
             realized += pv["pnl_abs"]
+    platform = await db.get(TradingPlatform, portfolio.platform_id) if portfolio.platform_id else None
     out = {
         "id": portfolio.id, "name": portfolio.name, "kind": portfolio.kind,
         "watch_enabled": portfolio.watch_enabled,
+        "platform_id": portfolio.platform_id,
+        "platform_name": platform.name if platform else None,
+        "fees_total": round(fees_total, 2),
         "created_at": portfolio.created_at,
         "open_positions": open_count,
         "invested": round(invested, 2),
@@ -111,7 +160,8 @@ async def list_portfolios(db: AsyncSession = Depends(get_db)):
 
 @router.post("/portfolios", status_code=201)
 async def create_portfolio(payload: PortfolioCreate, db: AsyncSession = Depends(get_db)):
-    portfolio = Portfolio(name=payload.name.strip(), kind=payload.kind)
+    portfolio = Portfolio(name=payload.name.strip(), kind=payload.kind,
+                          platform_id=payload.platform_id)
     if payload.kind == "auto":
         cfg = (payload.config or AutoConfig()).model_dump()
         portfolio.config = cfg
@@ -131,6 +181,8 @@ async def update_portfolio(portfolio_id: int, payload: PortfolioUpdate,
         portfolio.name = payload.name.strip()
     if payload.watch_enabled is not None:
         portfolio.watch_enabled = payload.watch_enabled
+    if payload.platform_id is not None:
+        portfolio.platform_id = None if payload.platform_id == -1 else payload.platform_id
     if payload.config is not None and portfolio.kind == "auto":
         portfolio.config = payload.config.model_dump()
     await db.commit()
@@ -219,13 +271,21 @@ async def add_position(portfolio_id: int, payload: PositionCreate,
     if entry_price is None:
         raise HTTPException(status_code=422, detail=f"Kein Kurs für {symbol} verfügbar")
 
+    from app.analysis.fees import portfolio_fee
+    asset = await db.get(Asset, symbol)
+    fee = await portfolio_fee(db, portfolio, asset.currency if asset else None,
+                              payload.quantity * entry_price)
+
     position = Position(
         portfolio_id=portfolio_id, symbol=symbol, quantity=payload.quantity,
-        entry_price=entry_price, notes=payload.notes,
+        entry_price=entry_price, notes=payload.notes, fee_buy=fee,
     )
     db.add(position)
+    # Auto-Portfolios führen Cash — Kaufkosten inkl. Gebühr abbuchen
+    if portfolio.kind == "auto":
+        portfolio.cash -= payload.quantity * entry_price + fee
     await db.commit()
-    return {"id": str(position.id), "entry_price": entry_price, "ok": True}
+    return {"id": str(position.id), "entry_price": entry_price, "fee": fee, "ok": True}
 
 
 @router.post("/positions/{position_id}/close")
@@ -249,7 +309,17 @@ async def close_position(position_id: uuid.UUID, payload: PositionClose,
     partial = sell_qty is not None and sell_qty < position.quantity
     now = utcnow()
 
+    from app.analysis.fees import portfolio_fee
+    portfolio = await db.get(Portfolio, position.portfolio_id)
+    asset = await db.get(Asset, position.symbol)
+    sold_quantity = sell_qty if partial else position.quantity
+    fee_sell = await portfolio_fee(db, portfolio, asset.currency if asset else None,
+                                   exit_price * sold_quantity)
+
     if partial:
+        # Kaufgebühr anteilig auf den verkauften Teil umlegen
+        fraction = sell_qty / position.quantity
+        fee_buy_share = round((position.fee_buy or 0.0) * fraction, 2)
         sold = Position(
             portfolio_id=position.portfolio_id, symbol=position.symbol,
             quantity=sell_qty, entry_price=position.entry_price,
@@ -257,24 +327,24 @@ async def close_position(position_id: uuid.UUID, payload: PositionClose,
             source=position.source, signal_id=position.signal_id,
             horizon_days=position.horizon_days,
             target_price=position.target_price, stop_price=position.stop_price,
+            fee_buy=fee_buy_share, fee_sell=fee_sell,
             notes=f"{position.notes or ''} | Teilverkauf {sell_qty} von {position.quantity}".strip(" |"),
         )
         db.add(sold)
         position.quantity = round(position.quantity - sell_qty, 6)
-        sold_quantity = sell_qty
+        position.fee_buy = round((position.fee_buy or 0.0) - fee_buy_share, 2)
     else:
         position.exit_price = exit_price
         position.exit_date = now
-        sold_quantity = position.quantity
+        position.fee_sell = fee_sell
 
-    # Auto-Portfolios führen Cash — Verkaufserlös gutschreiben
-    portfolio = await db.get(Portfolio, position.portfolio_id)
+    # Auto-Portfolios führen Cash — Verkaufserlös abzüglich Gebühr gutschreiben
     if portfolio and portfolio.kind == "auto":
-        portfolio.cash += exit_price * sold_quantity
+        portfolio.cash += exit_price * sold_quantity - fee_sell
 
     await db.commit()
     return {"ok": True, "exit_price": exit_price, "sold_quantity": sold_quantity,
-            "remaining": position.quantity if partial else 0}
+            "fee": fee_sell, "remaining": position.quantity if partial else 0}
 
 
 @router.delete("/positions/{position_id}")

@@ -98,17 +98,26 @@ async def add_to_watchlist(payload: WatchlistAdd, db: AsyncSession = Depends(get
     existing = await db.get(WatchlistItem, symbol)
     if existing:
         raise HTTPException(status_code=409, detail=f"{symbol} ist bereits auf der Watchlist")
+    asset_existed = await db.get(Asset, symbol) is not None
     try:
         await yahoo.ensure_asset(db, symbol)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Symbol {symbol} konnte nicht aufgelöst werden: {e}")
-    db.add(WatchlistItem(symbol=symbol, notes=payload.notes))
-    await db.commit()
-    # Kursdaten direkt initial laden, damit das Chart sofort etwas zeigt
+    # Kursdaten laden — und Tippfehler-Symbole ablehnen statt still anlegen
     try:
         await yahoo.sync_ohlcv(db, symbol)
     except Exception as e:
         logger.warning("Initialer Kurs-Sync %s fehlgeschlagen: %s", symbol, e)
+    if await yahoo.latest_close(db, symbol) is None:
+        if not asset_existed:
+            asset = await db.get(Asset, symbol)
+            if asset:
+                await db.delete(asset)
+                await db.commit()
+        raise HTTPException(status_code=422,
+                            detail=f"Keine Kursdaten für {symbol} — Symbol prüfen (Yahoo-Notation, z.B. CSCO, SAP.DE)")
+    db.add(WatchlistItem(symbol=symbol, notes=payload.notes))
+    await db.commit()
     return {"symbol": symbol, "ok": True}
 
 

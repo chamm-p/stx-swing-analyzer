@@ -112,6 +112,20 @@ class WatchlistItem(Base):
     min_confidence: Mapped[float] = mapped_column(Float, default=0.5)
 
 
+class TradingPlatform(Base):
+    """Handelsplattform mit Gebührenstaffel.
+
+    fees: {"default": [{"up_to": 500, "fee": 3.0}, …, {"up_to": null,
+    "fee": 190.0}], "EUR": [...]} — Lookup erst Währung, dann default;
+    up_to = null heißt „darüber"."""
+    __tablename__ = "trading_platforms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100))
+    fees: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Portfolio(Base):
     __tablename__ = "portfolios"
 
@@ -126,6 +140,9 @@ class Portfolio(Base):
     # Offene Positionen automatisch wie Watchlist-Einträge behandeln
     # (Analyse-Pipeline, Dashboard, abgeleitete Watchlist-Anzeige)
     watch_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    platform_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("trading_platforms.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -150,6 +167,9 @@ class Position(Base):
     # Take-Profit/Stop-Loss für Auto-Positionen (aus dem Signal übernommen)
     target_price: Mapped[float | None] = mapped_column(Float)
     stop_price: Mapped[float | None] = mapped_column(Float)
+    # Transaktionsgebühren (Plattform-Staffel) — Teil des ehrlichen P/L
+    fee_buy: Mapped[float] = mapped_column(Float, default=0.0)
+    fee_sell: Mapped[float] = mapped_column(Float, default=0.0)
 
 
 class UniverseSymbol(Base):

@@ -31,6 +31,8 @@ async def lifespan(app: FastAPI):
     async with SessionLocal() as db:
         await seed_default_sources(db)
         await seed_universe(db)
+        from app.analysis.fees import seed_platforms
+        await seed_platforms(db)
     # MCP-Session-Manager mitlaufen lassen (Mount führt eigene Lifespans nicht aus).
     async with contextlib.AsyncExitStack() as stack:
         await stack.enter_async_context(mcp_server.session_manager.run())

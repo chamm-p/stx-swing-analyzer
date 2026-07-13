@@ -10,15 +10,22 @@ from app.sources.yahoo import load_ohlcv_df
 
 
 def position_value(p: Position, current: float | None) -> dict:
-    """Bewertung einer Position: offen → aktueller Kurs, geschlossen → Exit."""
+    """Bewertung einer Position: offen → aktueller Kurs, geschlossen → Exit.
+
+    Ehrliches P/L: Kaufgebühr erhöht den Einstand, Verkaufsgebühr mindert
+    den Erlös (offene Positionen tragen die künftige Verkaufsgebühr noch
+    nicht — sie fällt erst bei Realisierung an)."""
     price = p.exit_price if p.exit_date else current
-    value = (price * p.quantity) if price is not None else None
-    invested = p.entry_price * p.quantity
+    fee_buy = p.fee_buy or 0.0
+    fee_sell = p.fee_sell or 0.0
+    value = (price * p.quantity - fee_sell) if price is not None else None
+    invested = p.entry_price * p.quantity + fee_buy
     pnl = (value - invested) if value is not None else None
     return {
         "current_price": price,
         "value": round(value, 2) if value is not None else None,
         "invested": round(invested, 2),
+        "fees": round(fee_buy + fee_sell, 2),
         "pnl_abs": round(pnl, 2) if pnl is not None else None,
         "pnl_pct": round(pnl / invested * 100, 2) if pnl is not None and invested else None,
     }

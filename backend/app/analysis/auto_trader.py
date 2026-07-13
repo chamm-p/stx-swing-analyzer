@@ -51,12 +51,15 @@ async def _open_positions(db: AsyncSession, portfolio_id: int) -> list[Position]
     return list(result.scalars().all())
 
 
-def _do_close(pf: Portfolio, p: Position, price: float, reason: str) -> None:
+def _do_close(pf: Portfolio, p: Position, price: float, reason: str,
+              fee: float = 0.0) -> None:
     p.exit_price = price
     p.exit_date = utcnow()
+    p.fee_sell = fee
     p.notes = f"{p.notes or ''} | Exit: {reason}".strip(" |")
-    pf.cash += price * p.quantity
-    logger.info("Auto-Portfolio %s: %s verkauft zu %.4f (%s)", pf.name, p.symbol, price, reason)
+    pf.cash += price * p.quantity - fee
+    logger.info("Auto-Portfolio %s: %s verkauft zu %.4f (%s, Gebühr %.2f)",
+                pf.name, p.symbol, price, reason, fee)
 
 
 async def _run_exits(db: AsyncSession, pf: Portfolio) -> int:
@@ -64,24 +67,30 @@ async def _run_exits(db: AsyncSession, pf: Portfolio) -> int:
 
     Grundlage sind Tagesschlusskurse (Paper-Trading) — Stop/Ziel werden
     also am Close geprüft, nicht intraday."""
+    from app.analysis.fees import portfolio_fee
+    from app.models import Asset
+
     closed = 0
     for p in await _open_positions(db, pf.id):
         price = await latest_close(db, p.symbol)
         if price is None:
             continue
+        asset = await db.get(Asset, p.symbol)
+        fee = await portfolio_fee(db, pf, asset.currency if asset else None,
+                                  price * p.quantity)
 
         if p.stop_price and price <= p.stop_price:
-            _do_close(pf, p, price, f"Stop-Loss ({p.stop_price}) erreicht")
+            _do_close(pf, p, price, f"Stop-Loss ({p.stop_price}) erreicht", fee)
             closed += 1
             continue
         if p.target_price and price >= p.target_price:
-            _do_close(pf, p, price, f"Kursziel ({p.target_price}) erreicht")
+            _do_close(pf, p, price, f"Kursziel ({p.target_price}) erreicht", fee)
             closed += 1
             continue
 
         horizon = p.horizon_days or 14
         if utcnow() >= p.entry_date + timedelta(days=horizon):
-            _do_close(pf, p, price, f"Horizont ({horizon}d) abgelaufen")
+            _do_close(pf, p, price, f"Horizont ({horizon}d) abgelaufen", fee)
             closed += 1
             continue
         sell_signal = await db.scalar(
@@ -91,7 +100,7 @@ async def _run_exits(db: AsyncSession, pf: Portfolio) -> int:
             ).order_by(desc(Signal.ts)).limit(1)
         )
         if sell_signal is not None:
-            _do_close(pf, p, price, "SELL-Signal")
+            _do_close(pf, p, price, "SELL-Signal", fee)
             closed += 1
     return closed
 
@@ -166,14 +175,20 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
         price = await latest_close(db, symbol)
         if price is None or price <= 0:
             continue
+        asset = None
         try:
             # Stammdaten anlegen (Name, Typ, News-Keywords), falls das
             # Symbol nur aus dem Screener-Universum kommt
-            await ensure_asset(db, symbol)
+            asset = await ensure_asset(db, symbol)
         except Exception as e:
             logger.warning("Asset-Stammdaten für %s nicht ladbar: %s", symbol, e)
+
+        from app.analysis.fees import portfolio_fee
         budget = min(cfg["max_per_trade"], pf.cash)
-        quantity = round(budget / price, 6)
+        fee = await portfolio_fee(db, pf, asset.currency if asset else None, budget)
+        quantity = round(max(budget - fee, 0) / price, 6)
+        if quantity <= 0:
+            continue
 
         # Take-Profit/Stop aus dem Signal übernehmen; für Screener-Käufe
         # frisch aus den aktuellen Indikatoren berechnen.
@@ -198,11 +213,11 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
             portfolio_id=pf.id, symbol=symbol, quantity=quantity,
             entry_price=price, source="auto", signal_id=cand["signal_id"],
             horizon_days=cand["horizon_days"],
-            target_price=target_price, stop_price=stop_price,
+            target_price=target_price, stop_price=stop_price, fee_buy=fee,
             notes=f"Auto-Kauf ({cand['origin']}, Rank {cand['rank']:+.2f}, "
                   f"Ziel {target_price}, Stop {stop_price})",
         ))
-        pf.cash -= quantity * price
+        pf.cash -= quantity * price + fee
         held.add(symbol)
         slots -= 1
         opened += 1
