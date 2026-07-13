@@ -81,7 +81,19 @@ export default function TopSignalsPage() {
     setMsg(null);
     try {
       await api.post("/api/screener/run");
-      setMsg("Scan gestartet — Universum wird analysiert (dauert einige Minuten).");
+      setMsg("⏳ Scan läuft — Universum wird abgerufen und bewertet…");
+      // Status pollen und Liste automatisch aktualisieren, sobald fertig
+      const seg = segment ? `&segment=${segment}` : "";
+      for (let i = 0; i < 120; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const d = await api.get(`/api/screener/top?limit=30${seg}`);
+        if (!d.running) {
+          setData(d);
+          setMsg(`✅ Scan abgeschlossen (${new Date(d.run_at).toLocaleTimeString("de-DE")}).`);
+          return;
+        }
+      }
+      setMsg("Scan läuft ungewöhnlich lange — Seite später neu laden.");
     } catch (e: any) {
       setMsg(e.message);
     }

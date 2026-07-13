@@ -37,6 +37,7 @@ async def scan_universe(db: AsyncSession) -> int:
             select(UniverseSymbol).where(UniverseSymbol.active == True)  # noqa: E712
         )
         symbols = result.scalars().all()
+        logger.info("Screener-Scan gestartet: %d Symbole", len(symbols))
         run_at = utcnow()
         rows: list[ScreenerResult] = []
 
