@@ -21,10 +21,17 @@ type NewsItem = {
 
 type Analysis = { id: string; ts: string; model: string | null; payload: any };
 
+type Catalyst = {
+  type: string | null; title: string | null; date: string;
+  importance: number | null; phase: string | null;
+  indication: string | null; source_url: string | null;
+};
+
 type Events = {
   earnings_dates: string[];
   ex_dividend_date: string | null;
   dividend_date: string | null;
+  catalysts: Catalyst[];
 };
 
 type Profile = {
@@ -310,7 +317,8 @@ function EventsBar({ events }: { events: Events | null }) {
   const today = new Date().toISOString().slice(0, 10);
   const nextEarnings = (events.earnings_dates || []).filter((d) => d >= today)[0];
   const exDiv = events.ex_dividend_date && events.ex_dividend_date >= today ? events.ex_dividend_date : null;
-  if (!nextEarnings && !exDiv) return null;
+  const catalysts = (events.catalysts || []).filter((c) => c.date >= today).slice(0, 3);
+  if (!nextEarnings && !exDiv && catalysts.length === 0) return null;
 
   const daysTo = (d: string) =>
     Math.round((new Date(d).getTime() - new Date(today).getTime()) / 86400000);
@@ -329,6 +337,19 @@ function EventsBar({ events }: { events: Events | null }) {
           Ex-Dividende: <span className="font-semibold">{new Date(exDiv).toLocaleDateString("de-DE")}</span>
         </span>
       )}
+      {catalysts.map((c, i) => (
+        <span key={i} className="text-slate-300" title={c.indication || ""}>
+          💊 {c.source_url ? (
+            <a href={c.source_url} target="_blank" rel="noreferrer" className="hover:text-sky-400">
+              {c.title}
+            </a>
+          ) : c.title}
+          : <span className="font-semibold">{new Date(c.date).toLocaleDateString("de-DE")}</span>
+          {c.importance != null && (
+            <span className="ml-1 text-xs text-amber-400">({c.importance}/10)</span>
+          )}
+        </span>
+      ))}
     </div>
   );
 }

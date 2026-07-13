@@ -48,26 +48,38 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
     articles = await recent_scored_articles(db, symbol)
     sentiment = aggregate_sentiment(articles)
 
-    # 1b) Anstehende Termine (Quartalszahlen, Ex-Dividende) — Event-Risiko
+    # 1b) Anstehende Termine (Quartalszahlen, Ex-Dividende, Biotech-
+    #     Katalysatoren) — Event-Risiko
     events: dict = {}
     events_text = "(keine bekannt)"
     next_earnings: str | None = None
+    catalysts: list[dict] = []
     if asset.asset_type != "crypto":
+        parts = []
         try:
             from app.sources.yahoo import fetch_events
             events = await fetch_events(symbol)
             today = utcnow().date().isoformat()
             upcoming = [d for d in events.get("earnings_dates", []) if d >= today]
             next_earnings = upcoming[0] if upcoming else None
-            parts = []
             if next_earnings:
                 parts.append(f"Quartalszahlen am {next_earnings}")
             if events.get("ex_dividend_date") and events["ex_dividend_date"] >= today:
                 parts.append(f"Ex-Dividende am {events['ex_dividend_date']}")
-            if parts:
-                events_text = "; ".join(parts)
         except Exception as e:
             logger.warning("Termine für %s nicht abrufbar: %s", symbol, e)
+        try:
+            from app.sources.catalyst import fetch_catalysts
+            catalysts = await fetch_catalysts(symbol)
+            for c in catalysts[:5]:
+                parts.append(
+                    f"{c.get('phase') or c.get('type')}: {c.get('title')} am {c['date']} "
+                    f"(Wichtigkeit {c.get('importance')}/10)"
+                )
+        except Exception as e:
+            logger.warning("Katalysatoren für %s nicht abrufbar: %s", symbol, e)
+        if parts:
+            events_text = "; ".join(parts)
 
     # 2) LLM-Gesamteinschätzung (fundamental) — fail-soft auf neutral
     fundamental, review = 0.0, {}
@@ -141,6 +153,14 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
             rationale_parts.append(
                 f"⚠️ Quartalszahlen am {next_earnings} (in {days_to} Tagen) — "
                 f"Event-Risiko im Signalhorizont"
+            )
+    for c in catalysts:
+        from datetime import date
+        days_to = (date.fromisoformat(c["date"]) - utcnow().date()).days
+        if 0 <= days_to <= horizon_days and (c.get("importance") or 0) >= 6:
+            rationale_parts.append(
+                f"⚠️ Katalysator: {c.get('title')} am {c['date']} "
+                f"(Wichtigkeit {c.get('importance')}/10) — binäres Event-Risiko"
             )
     if review.get("summary"):
         rationale_parts.append(str(review["summary"]))

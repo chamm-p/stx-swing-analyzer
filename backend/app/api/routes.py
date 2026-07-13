@@ -315,12 +315,22 @@ async def asset_profile(symbol: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/assets/{symbol}/events")
 async def asset_events(symbol: str):
-    """Anstehende Termine (Quartalszahlen, Dividende) — Redis-gecacht (12h)."""
+    """Anstehende Termine: Quartalszahlen/Dividende (Yahoo) + Biotech-
+    Katalysatoren (CatalystAlert). Beides Redis-gecacht (12h)."""
+    from app.sources.catalyst import fetch_catalysts
+
+    symbol = symbol.upper()
+    out = {"earnings_dates": [], "ex_dividend_date": None, "dividend_date": None,
+           "catalysts": []}
     try:
-        return await yahoo.fetch_events(symbol.upper())
+        out.update(await yahoo.fetch_events(symbol))
     except Exception as e:
         logger.warning("Termine für %s nicht abrufbar: %s", symbol, e)
-        return {"earnings_dates": [], "ex_dividend_date": None, "dividend_date": None}
+    try:
+        out["catalysts"] = await fetch_catalysts(symbol)
+    except Exception as e:
+        logger.warning("Katalysatoren für %s nicht abrufbar: %s", symbol, e)
+    return out
 
 
 @router.get("/assets/{symbol}/news")
