@@ -61,6 +61,68 @@ async def put_comm(payload: CommSettings, db: AsyncSession = Depends(get_db)):
     return await public_view(db, "comm")
 
 
+@router.post("/settings/llm/test")
+async def test_llm(payload: LlmSettings, db: AsyncSession = Depends(get_db)):
+    """Mini-Completion als Verbindungstest (Cache per Nonce umgangen)."""
+    import time
+
+    from app.llm.client import LLMClient, LLMError
+
+    eff = await load_settings(db, "llm")
+    merged = {**eff, **{k: v for k, v in payload.model_dump(exclude_none=True).items() if v}}
+    client = LLMClient(merged)
+    t0 = time.monotonic()
+    try:
+        reply = await client.complete(
+            "Du bist ein Verbindungstest. Antworte mit genau einem Wort.",
+            f"Sage 'OK'. (Test-Nonce: {time.time()})",
+        )
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {
+        "ok": True,
+        "model": client.model,
+        "latency_ms": int((time.monotonic() - t0) * 1000),
+        "reply": reply.strip()[:200],
+    }
+
+
+class CommTest(CommSettings):
+    channel: str  # email | telegram
+
+
+@router.post("/settings/comm/test")
+async def test_comm(payload: CommTest, db: AsyncSession = Depends(get_db)):
+    """Sendet eine Testnachricht über den gewählten Kanal (Formularwerte
+    haben Vorrang, Secrets fallen auf gespeicherte/Env-Werte zurück)."""
+    import asyncio
+
+    from app.alerts.dispatcher import send_email_sync, send_telegram
+
+    eff = await load_settings(db, "comm")
+    overrides = {k: v for k, v in payload.model_dump(exclude_none=True).items()
+                 if v and k != "channel"}
+    merged = {**eff, **overrides}
+    text = "✅ stx-swing-analyzer — Testnachricht. Dieser Kanal funktioniert."
+
+    try:
+        if payload.channel == "telegram":
+            if not (merged.get("telegram_bot_token") and merged.get("telegram_chat_id")):
+                raise HTTPException(status_code=422, detail="Bot-Token und Chat-ID erforderlich")
+            await send_telegram(merged, text)
+        elif payload.channel == "email":
+            if not (merged.get("smtp_host") and merged.get("alert_email_to")):
+                raise HTTPException(status_code=422, detail="SMTP-Host und Alert-Empfänger erforderlich")
+            await asyncio.to_thread(send_email_sync, merged, "[stx] Testnachricht", text)
+        else:
+            raise HTTPException(status_code=422, detail="channel muss 'email' oder 'telegram' sein")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Versand fehlgeschlagen: {e}")
+    return {"ok": True, "channel": payload.channel}
+
+
 @router.delete("/settings/{key}")
 async def reset_settings(key: str, db: AsyncSession = Depends(get_db)):
     """Setzt eine Sektion auf die .env-Defaults zurück (löscht Overrides

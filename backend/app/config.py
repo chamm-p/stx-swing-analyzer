@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     retention_ohlcv_days: int = 730
     retention_news_days: int = 365
 
+    # MCP-Server: statisches Zugriffs-Token für /api/mcp (leer = deaktiviert)
+    mcp_token: str = ""
+
     # Alerts
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""

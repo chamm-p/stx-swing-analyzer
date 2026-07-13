@@ -81,6 +81,21 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
     }
   }
 
+  async function testLlm() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await api.post("/api/settings/llm/test", {
+        provider, base_url: baseUrl, model, api_key: apiKey || null,
+      });
+      setMsg(`✅ ${res.model} antwortet in ${res.latency_ms} ms: „${res.reply}"`);
+    } catch (e: any) {
+      setMsg(`❌ ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
       <h2 className="mb-3 font-semibold">🤖 LLM</h2>
@@ -126,6 +141,10 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
       <div className="mt-3 flex items-center gap-3">
         <button onClick={save} className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">
           Speichern
+        </button>
+        <button onClick={testLlm} disabled={busy}
+          className="rounded border border-slate-700 px-3 py-2 text-sm hover:border-emerald-500 disabled:opacity-50">
+          {busy ? "Teste…" : "Verbindung testen"}
         </button>
         <ResetButton section="llm" onDone={onSaved} />
         {msg && <span className="text-sm text-amber-400">{msg}</span>}
@@ -184,6 +203,20 @@ function CommSection({ initial, onSaved }: { initial: CommView; onSaved: () => v
     }
   }
 
+  async function test(channel: "email" | "telegram") {
+    setMsg(null);
+    try {
+      await api.post("/api/settings/comm/test", {
+        ...form, channel,
+        smtp_password: form.smtp_password || null,
+        telegram_bot_token: form.telegram_bot_token || null,
+      });
+      setMsg(`✅ Testnachricht via ${channel === "email" ? "E-Mail" : "Telegram"} versendet — bitte Eingang prüfen.`);
+    } catch (e: any) {
+      setMsg(`❌ ${e.message}`);
+    }
+  }
+
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
       <h2 className="mb-3 font-semibold">📨 Kommunikation (Alerts)</h2>
@@ -210,6 +243,14 @@ function CommSection({ initial, onSaved }: { initial: CommView; onSaved: () => v
       <div className="mt-3 flex items-center gap-3">
         <button onClick={save} className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">
           Speichern
+        </button>
+        <button onClick={() => test("email")}
+          className="rounded border border-slate-700 px-3 py-2 text-sm hover:border-emerald-500">
+          Test-E-Mail
+        </button>
+        <button onClick={() => test("telegram")}
+          className="rounded border border-slate-700 px-3 py-2 text-sm hover:border-emerald-500">
+          Test-Telegram
         </button>
         <ResetButton section="comm" onDone={onSaved} />
         {msg && <span className="text-sm text-amber-400">{msg}</span>}

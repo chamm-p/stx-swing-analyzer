@@ -155,6 +155,40 @@ Generic-OIDC-Implementierung aus cura_llm (JWKS-verifizierte ID-Tokens,
 State/Nonce-Replay-Schutz via Redis). `ALLOWED_EMAILS` wirkt als
 Single-User-Gate.
 
+## MCP-Connector
+
+Das Backend exponiert einen **MCP-Server** (Streamable HTTP, Muster aus
+cura-stro) unter `http://<host>:5800/api/mcp` — läuft durch den
+Frontend-Proxy, kein zusätzlicher Port. Aktivierung: `MCP_TOKEN` in der
+`.env` setzen (`openssl rand -hex 24`); Auth per Header `x-stx-token`
+oder `Authorization: Bearer <token>`.
+
+Tools: `get_signals`, `get_top_signals` (Screener, filterbar nach
+US/DAX/CRYPTO), `get_watchlist`, `get_asset_analysis` (Indikatoren +
+LLM-Review + News-Sentiment), `get_portfolios`, `get_signal_review`
+(Trefferquoten), `add_to_watchlist`, `run_analysis`.
+
+Anbindung, z.B. Claude Code:
+
+```bash
+claude mcp add --transport http stx http://<host>:5800/api/mcp \
+  --header "x-stx-token: <MCP_TOKEN>"
+```
+
+Für Clients ohne Streamable-HTTP-Support via `mcp-remote`:
+
+```json
+{
+  "mcpServers": {
+    "stx": {
+      "command": "npx",
+      "args": ["mcp-remote", "http://<host>:5800/api/mcp",
+               "--header", "x-stx-token: <MCP_TOKEN>"]
+    }
+  }
+}
+```
+
 ## cura_llm-Reuse
 
 | Modul | Herkunft |
