@@ -40,8 +40,24 @@ class WatchlistUpdate(BaseModel):
 
 @router.get("/watchlist")
 async def get_watchlist(db: AsyncSession = Depends(get_db)):
-    """Manuelle Einträge + abgeleitete Symbole aus beobachteten Portfolios."""
+    """Manuelle Einträge + abgeleitete Symbole aus beobachteten Portfolios.
+
+    Auch manuelle Einträge zeigen ihre Portfolio-Zugehörigkeit (offene
+    Positionen, unabhängig vom Beobachten-Schalter) — sonst verschluckt
+    „Quelle: Watchlist" die Information, dass der Wert gehalten wird."""
     from app.analysis.watch_scope import DERIVED_MIN_CONFIDENCE, derived_symbols
+    from app.models import Portfolio, Position
+
+    holdings_res = await db.execute(
+        select(Position.symbol, Portfolio.name)
+        .join(Portfolio, Portfolio.id == Position.portfolio_id)
+        .where(Position.exit_date.is_(None))
+    )
+    holdings: dict[str, list[str]] = {}
+    for sym, pf_name in holdings_res.all():
+        names = holdings.setdefault(sym, [])
+        if pf_name not in names:
+            names.append(pf_name)
 
     async def entry(symbol: str, asset: Asset | None, base: dict) -> dict:
         last_signal = await db.scalar(
@@ -76,6 +92,7 @@ async def get_watchlist(db: AsyncSession = Depends(get_db)):
         manual_symbols.add(item.symbol)
         out.append(await entry(item.symbol, asset, {
             "source": "watchlist",
+            "portfolios": holdings.get(item.symbol),
             "alert_enabled": item.alert_enabled,
             "min_confidence": item.min_confidence,
             "notes": item.notes,

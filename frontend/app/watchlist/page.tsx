@@ -151,7 +151,14 @@ export default function WatchlistPage() {
                           📁 {item.portfolios?.join(", ")}
                         </span>
                       ) : (
-                        <span className="text-slate-500">Watchlist</span>
+                        <span className="text-slate-500">
+                          Watchlist
+                          {item.portfolios && item.portfolios.length > 0 && (
+                            <span className="text-sky-400/80" title={`gehalten in: ${item.portfolios.join(", ")}`}>
+                              {" · 📁 "}{item.portfolios.join(", ")}
+                            </span>
+                          )}
+                        </span>
                       )}
                     </td>
                     <td className="px-3 py-2">
