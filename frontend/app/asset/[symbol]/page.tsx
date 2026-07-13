@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api, Signal } from "@/lib/api";
+import { api, runAnalysis, Signal } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
 import PriceChart from "@/components/PriceChart";
 
@@ -56,7 +56,7 @@ export default function AssetPage() {
     setRunResult(null);
     setError(null);
     try {
-      const res = await api.post(`/api/signals/run/${symbol}`);
+      const res = await runAnalysis(symbol);
       if (res.created && res.signal) {
         setRunResult(`✅ Analyse abgeschlossen — neues Signal: ${res.signal.action} (${Math.round(res.signal.confidence * 100)}%)`);
       } else {

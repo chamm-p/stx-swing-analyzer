@@ -64,6 +64,20 @@ export type Signal = {
   analyst_count: number | null;
 };
 
+/** Startet die Analyse (202) und pollt den Status bis done/error. */
+export async function runAnalysis(symbol: string, timeoutMs = 300000): Promise<any> {
+  await api.post(`/api/signals/run/${symbol}`);
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const st = await api.get(`/api/signals/run/${symbol}/status`);
+    if (st.state === "done") return st;
+    if (st.state === "error") throw new ApiError(500, st.detail || "Analyse fehlgeschlagen");
+    if (st.state === "unknown") throw new ApiError(500, "Analyse-Status verloren — bitte erneut starten");
+  }
+  throw new ApiError(504, "Analyse dauert ungewöhnlich lange — Status später auf der Asset-Seite prüfen");
+}
+
 export type WatchlistEntry = {
   symbol: string;
   name: string | null;

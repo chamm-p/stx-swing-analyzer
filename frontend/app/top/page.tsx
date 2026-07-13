@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, runAnalysis } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
 
 type ScreenerRow = {
@@ -97,7 +97,7 @@ export default function TopSignalsPage() {
       } catch (e: any) {
         if (e.status !== 409) throw e;
       }
-      const res = await api.post(`/api/signals/run/${symbol}`);
+      const res = await runAnalysis(symbol);
       const s = res.signal;
       setRowStatus((st) => ({
         ...st,

@@ -158,13 +158,47 @@ async def list_signals(symbol: str | None = None, limit: int = 50,
     return [_signal_dict(s) for s in result.scalars().all()]
 
 
-@router.post("/signals/run/{symbol}")
+_ANALYZE_STATUS_TTL = 600
+
+
+async def _run_analysis_bg(symbol: str) -> None:
+    """Analyse im Hintergrund; Status/Ergebnis in Redis."""
+    import asyncio  # noqa: F401 — Symmetrie zu create_task-Aufrufer
+    import json as _json
+
+    from app.database import SessionLocal
+    from app.services_redis import get_redis
+
+    r = get_redis()
+    key = f"analyze:{symbol}"
+    try:
+        async with SessionLocal() as db:
+            await yahoo.sync_ohlcv(db, symbol)
+            signal = await run_for_symbol(db, symbol)
+        payload = {"state": "done", "created": signal is not None,
+                   "signal": _signal_dict(signal) if signal else None}
+    except Exception as e:
+        logger.exception("Hintergrund-Analyse %s fehlgeschlagen", symbol)
+        payload = {"state": "error", "detail": str(e)[:300]}
+    await r.set(key, _json.dumps(payload, default=str), ex=_ANALYZE_STATUS_TTL)
+
+
+@router.post("/signals/run/{symbol}", status_code=202)
 async def trigger_analysis(symbol: str, db: AsyncSession = Depends(get_db)):
-    """Manuelle Analyse eines Symbols (synchron — kann je nach LLM dauern).
+    """Manuelle Analyse eines Symbols — asynchron.
+
+    Mit vielen ungelesenen News dauert die LLM-Analyse Minuten; ein
+    synchroner Request liefe in den Proxy-Timeout (der Browser sähe einen
+    Internal Server Error, obwohl das Backend sauber fertig rechnet).
+    Daher: 202 + Status-Polling über GET .../status.
 
     Zulässig für die effektive Watchlist: manuelle Einträge UND offene
     Positionen aus Portfolios mit aktivem „Beobachten"-Schalter."""
+    import asyncio
+    import json as _json
+
     from app.analysis.watch_scope import effective_symbols
+    from app.services_redis import get_redis
 
     symbol = symbol.upper()
     if symbol not in await effective_symbols(db):
@@ -172,9 +206,26 @@ async def trigger_analysis(symbol: str, db: AsyncSession = Depends(get_db)):
             status_code=404,
             detail="Weder auf der Watchlist noch in einem beobachteten Portfolio",
         )
-    await yahoo.sync_ohlcv(db, symbol)
-    signal = await run_for_symbol(db, symbol)
-    return {"created": signal is not None, "signal": _signal_dict(signal) if signal else None}
+    r = get_redis()
+    key = f"analyze:{symbol}"
+    existing = await r.get(key)
+    if existing and _json.loads(existing).get("state") == "running":
+        return {"state": "running", "info": "Analyse läuft bereits"}
+    await r.set(key, _json.dumps({"state": "running"}), ex=_ANALYZE_STATUS_TTL)
+    asyncio.create_task(_run_analysis_bg(symbol))
+    return {"state": "running"}
+
+
+@router.get("/signals/run/{symbol}/status")
+async def analysis_status(symbol: str):
+    import json as _json
+
+    from app.services_redis import get_redis
+
+    raw = await get_redis().get(f"analyze:{symbol.upper()}")
+    if not raw:
+        return {"state": "unknown"}
+    return _json.loads(raw)
 
 
 # ---------------------------------------------------------------- Assets / Charts
