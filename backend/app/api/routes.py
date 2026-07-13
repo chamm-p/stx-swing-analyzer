@@ -350,6 +350,19 @@ async def asset_profile(symbol: str, db: AsyncSession = Depends(get_db)):
     return profile
 
 
+@router.get("/assets/{symbol}/quote")
+async def asset_quote(symbol: str, db: AsyncSession = Depends(get_db)):
+    """Leichter Kurs-Abruf für den Kauf-Assistenten."""
+    symbol = symbol.upper()
+    asset = await db.get(Asset, symbol)
+    return {
+        "symbol": symbol,
+        "name": asset.name if asset else None,
+        "currency": asset.currency if asset else None,
+        "close": await yahoo.latest_close(db, symbol),
+    }
+
+
 @router.get("/assets/{symbol}/events")
 async def asset_events(symbol: str, db: AsyncSession = Depends(get_db)):
     """Anstehende Termine: Quartalszahlen/Dividende (Yahoo), Biotech-

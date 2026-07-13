@@ -87,8 +87,15 @@ def run_backtest(
     config: StrategyConfig,
     currencies: dict[str, str] | None = None,
     score_fn: Callable[[str, dict], float] | None = None,
+    trade_start: pd.Timestamp | None = None,
+    trade_end: pd.Timestamp | None = None,
 ) -> BacktestResult:
-    """Simuliert die Strategie über die gemeinsame Zeitachse aller Symbole."""
+    """Simuliert die Strategie über die gemeinsame Zeitachse aller Symbole.
+
+    trade_start/trade_end begrenzen das Handelsfenster (für Walk-Forward):
+    Indikatoren nutzen die volle Historie davor (kein Warmup-Verlust),
+    gehandelt wird nur im Fenster; am Fensterende werden offene
+    Positionen zum Schlusskurs glattgestellt."""
     profile = config.profile()
     currencies = currencies or {}
     slip = config.slippage_bps / 10_000.0
@@ -138,6 +145,8 @@ def run_backtest(
         del open_trades[trade.symbol]
 
     for t in all_dates:
+        if trade_end is not None and t > trade_end:
+            break
         # 0) Schlusskurse für die Tagesbewertung aktualisieren (ALLE
         #    Symbole — auch gehaltene, sonst bewertet Equity mit
         #    veralteten Kursen)
@@ -216,14 +225,24 @@ def run_backtest(
         candidates.sort(reverse=True)
         slots = config.max_positions - len(open_trades)
         pending_entries = [symbol for _, symbol in candidates[:max(slots, 0)]]
+        if trade_start is not None and t < trade_start:
+            pending_entries = []  # Fenster noch nicht offen — nur beobachten
+
+        # Fensterende: alles zum Schlusskurs glattstellen
+        if trade_end is not None and t == trade_end:
+            for symbol in list(open_trades.keys()):
+                if symbol in last_close:
+                    close_trade(open_trades[symbol], t,
+                                last_close[symbol] * (1 - slip), "window_end")
 
         # 4) Equity festhalten (Cash + offene Positionen zum letzten Close)
         position_value = sum(
             tr.quantity * last_close.get(sym, tr.entry_price)
             for sym, tr in open_trades.items()
         )
-        equity_index.append(t)
-        equity_values.append(cash + position_value)
+        if trade_start is None or t >= trade_start:
+            equity_index.append(t)
+            equity_values.append(cash + position_value)
 
     equity = pd.Series(equity_values, index=equity_index, dtype=float)
     return BacktestResult(

@@ -43,6 +43,16 @@ export default function BacktestPage() {
   const [paramValues, setParamValues] = useState<Record<string, string>>(
     Object.fromEntries(PARAM_FIELDS.map((f) => [f.key, f.def]))
   );
+  const [mode, setMode] = useState<"single" | "walkforward">("single");
+  const [gridValues, setGridValues] = useState<Record<string, string>>({
+    threshold: "0.35, 0.40, 0.45",
+    target_atr_factor: "",
+    stop_atr_factor: "",
+    position_size: "",
+  });
+  const [trainDays, setTrainDays] = useState("365");
+  const [testDays, setTestDays] = useState("90");
+  const [minTrades, setMinTrades] = useState("20");
   const [msg, setMsg] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -61,6 +71,17 @@ export default function BacktestPage() {
       const v = parseFloat((paramValues[f.key] || "").replace(",", "."));
       if (!isNaN(v)) params[f.key] = v;
     }
+    const grid: Record<string, number[]> = {};
+    if (mode === "walkforward") {
+      for (const [key, raw] of Object.entries(gridValues)) {
+        const values = raw.split(",").map((s) => parseFloat(s.trim().replace(",", "."))).filter((v) => !isNaN(v));
+        if (values.length > 0) grid[key] = values;
+      }
+      if (Object.keys(grid).length === 0) {
+        setMsg("❌ Walk-Forward braucht mindestens einen Grid-Parameter (z.B. Schwelle: 0.35, 0.40).");
+        return;
+      }
+    }
     try {
       const res = await api.post("/api/backtest/run", {
         label: label.trim() || null,
@@ -69,6 +90,11 @@ export default function BacktestPage() {
         backfill,
         platform_id: platformId === "" ? null : platformId,
         params,
+        mode,
+        grid,
+        train_days: parseInt(trainDays),
+        test_days: parseInt(testDays),
+        min_trades: parseInt(minTrades),
       });
       setMsg(backfill
         ? "⏳ Lauf gestartet — Backfill der Historie kann einige Minuten dauern…"
@@ -162,9 +188,45 @@ export default function BacktestPage() {
             </Field>
           ))}
         </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-800 pt-3">
+          <div className="flex overflow-hidden rounded border border-slate-700 text-xs">
+            <button onClick={() => setMode("single")}
+              className={`px-3 py-1.5 ${mode === "single" ? "bg-sky-600 text-white" : "text-slate-400"}`}>
+              Einzel-Lauf
+            </button>
+            <button onClick={() => setMode("walkforward")}
+              className={`px-3 py-1.5 ${mode === "walkforward" ? "bg-sky-600 text-white" : "text-slate-400"}`}
+              title="Kalibrieren auf Trainingsfenster, ungesehen bewerten auf Testfenster — nur Out-of-Sample zählt">
+              Walk-Forward
+            </button>
+          </div>
+          {mode === "walkforward" && (
+            <>
+              <Field label="Training / Test (Tage)">
+                <span className="flex gap-1">
+                  <input value={trainDays} onChange={(e) => setTrainDays(e.target.value)} className={inputCls + " w-16"} />
+                  <input value={testDays} onChange={(e) => setTestDays(e.target.value)} className={inputCls + " w-16"} />
+                </span>
+              </Field>
+              <Field label="Min. Trades (Guard)">
+                <input value={minTrades} onChange={(e) => setMinTrades(e.target.value)} className={inputCls + " w-16"} />
+              </Field>
+            </>
+          )}
+        </div>
+        {mode === "walkforward" && (
+          <div className="mt-2 flex flex-wrap gap-3">
+            {Object.entries(gridValues).map(([key, raw]) => (
+              <Field key={key} label={`Grid: ${PARAM_FIELDS.find((f) => f.key === key)?.label || key} (Komma-Liste)`}>
+                <input value={raw} onChange={(e) => setGridValues({ ...gridValues, [key]: e.target.value })}
+                  placeholder="leer = Basiswert" className={inputCls + " w-44"} />
+              </Field>
+            ))}
+          </div>
+        )}
         <div className="mt-3 flex items-center gap-3">
           <button onClick={start} className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">
-            Backtest starten
+            {mode === "walkforward" ? "Walk-Forward starten" : "Backtest starten"}
           </button>
           {msg && <span className="text-sm text-amber-400">{msg}</span>}
         </div>
@@ -188,6 +250,37 @@ export default function BacktestPage() {
             <Stat label="Gebühren" value={String(detail.fees_total ?? 0)} />
           </div>
           <EquityChart data={detail.equity} benchmark={detail.benchmark} benchmarkLabel="SPY" />
+          {detail.metrics?.mode === "walkforward" && detail.metrics?.windows && (
+            <div className="mt-3">
+              <h3 className="mb-1 text-sm font-semibold">
+                Walk-Forward-Fenster ({detail.metrics.windows_tested}/{detail.metrics.windows_total} getestet
+                {detail.metrics.param_stability != null && `, Parameter-Stabilität ${Math.round(detail.metrics.param_stability * 100)}%`})
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="text-left text-slate-500">
+                    <tr><th>Testfenster</th><th>Gewählte Parameter</th><th>Train-Score</th><th>Test-Rendite</th><th>Trades</th></tr>
+                  </thead>
+                  <tbody>
+                    {detail.metrics.windows.map((w: any, i: number) => (
+                      <tr key={i} className="border-t border-slate-800/60">
+                        <td className="py-0.5">{w.test[0]} → {w.test[1]}</td>
+                        <td className="text-slate-400">
+                          {w.skipped ? <span className="text-amber-400">{w.skipped}</span>
+                            : Object.entries(w.chosen_params || {}).map(([k, v]) => `${k}=${v}`).join(", ") || "Basis"}
+                        </td>
+                        <td>{w.train_score ?? "—"}</td>
+                        <td className={`font-mono ${(w.test_return_pct ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {w.test_return_pct != null ? `${w.test_return_pct}%` : "—"}
+                        </td>
+                        <td>{w.test_trades ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           {detail.metrics?.exit_reasons && (
             <p className="mt-2 text-xs text-slate-500">
               Exits: 🎯 Ziel {detail.metrics.exit_reasons.target} · 🛑 Stop {detail.metrics.exit_reasons.stop} ·

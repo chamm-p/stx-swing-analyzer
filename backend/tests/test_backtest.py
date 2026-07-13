@@ -166,6 +166,69 @@ class TestMetriken:
         assert buy_and_hold_return(df, df.index[0], df.index[-1]) == 20.0
 
 
+class TestHandelsfenster:
+    def test_kein_handel_vor_fensterstart(self):
+        closes = flat()
+        closes[SIGNAL_DAY] = 100.5
+        df = make_df(closes)
+        marker = df["close"].iloc[SIGNAL_DAY]
+
+        def score_fn(symbol, snapshot):
+            return 1.0 if snapshot["close"] == marker else 0.0
+
+        # Fenster beginnt erst NACH dem Signaltag → kein Trade
+        result = run_backtest({"SYM": df}, CFG, score_fn=score_fn,
+                              trade_start=df.index[SIGNAL_DAY + 10],
+                              trade_end=df.index[-1])
+        assert len(result.trades) == 0
+
+    def test_fensterende_stellt_glatt(self):
+        closes = flat()
+        closes[SIGNAL_DAY] = 100.5
+        df = make_df(closes)
+        marker = df["close"].iloc[SIGNAL_DAY]
+
+        def score_fn(symbol, snapshot):
+            return 1.0 if snapshot["close"] == marker else 0.0
+
+        end = df.index[SIGNAL_DAY + 4]  # vor Horizont-Ablauf
+        result = run_backtest({"SYM": df}, CFG, score_fn=score_fn,
+                              trade_start=df.index[0], trade_end=end)
+        trade = result.trades[0]
+        assert trade.reason == "window_end"
+        assert trade.exit_date == end
+        # Equity endet am Fensterende
+        assert result.equity.index[-1] == end
+
+
+class TestWalkForward:
+    def test_grid_kartesisch_und_deckel(self):
+        from app.backtest.walkforward import build_grid
+        combos = build_grid({"threshold": [0.3, 0.4], "position_size": [1000, 2000]})
+        assert len(combos) == 4
+        assert {"threshold": 0.3, "position_size": 2000} in combos
+        assert build_grid({}) == [{}]
+
+    def test_walkforward_struktur(self):
+        from app.backtest.walkforward import walk_forward
+        # 700 Handelstage Zufallslauf — es geht um Struktur, nicht Alpha
+        rng = np.random.default_rng(7)
+        closes = 100 * np.cumprod(1 + rng.normal(0.0004, 0.015, 700))
+        data = {"SYM": make_df(list(closes))}
+        base = {**CFG.to_dict()}
+        base.pop("fees", None)
+        wf = walk_forward(data, base, {"threshold": [0.3, 0.4]},
+                          train_days=200, test_days=80, min_trades=0)
+        assert wf["oos"]["windows_total"] >= 2
+        for w in wf["windows"]:
+            assert "test" in w and "train" in w
+            # Testfenster beginnt, wo Training endet (kein Überlappen)
+            assert w["train"][1] == w["test"][0]
+        if wf["equity"]:
+            times = [p["time"] for p in wf["equity"]]
+            assert times == sorted(times)
+
+
 class TestIntegrationEchtesScoring:
     def test_lauf_ohne_injektion_stabil(self):
         # Trendwechsel-Muster: Anstieg, Einbruch, Erholung — es geht nur um

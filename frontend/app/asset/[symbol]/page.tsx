@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { api, runAnalysis, Signal } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
 import PriceChart from "@/components/PriceChart";
+import BuyDialog from "@/components/BuyDialog";
 
 type ChartData = {
   candles: any[];
@@ -60,8 +61,7 @@ export default function AssetPage() {
   const [rangeDays, setRangeDays] = useState(365);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<string | null>(null);
-  const [portfolios, setPortfolios] = useState<{ id: number; name: string; kind: string }[]>([]);
-  const [targetPortfolio, setTargetPortfolio] = useState<number | null>(null);
+  const [buyOpen, setBuyOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -70,10 +70,6 @@ export default function AssetPage() {
     api.get(`/api/assets/${symbol}/analyses`).then(setAnalyses).catch(() => {});
     api.get(`/api/assets/${symbol}/profile`).then(setProfile).catch(() => {});
     api.get(`/api/assets/${symbol}/events`).then(setEvents).catch(() => {});
-    api.get("/api/portfolios").then((p) => {
-      setPortfolios(p);
-      if (p.length > 0) setTargetPortfolio((cur: number | null) => cur ?? p[0].id);
-    }).catch(() => {});
   }, [symbol, rangeDays]);
   useEffect(load, [load]);
 
@@ -136,35 +132,12 @@ export default function AssetPage() {
           >
             → Watchlist
           </button>
-          {portfolios.length > 0 && (
-            <span className="flex items-center gap-1">
-              <select value={targetPortfolio ?? ""} onChange={(e) => setTargetPortfolio(Number(e.target.value))}
-                className="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-300">
-                {portfolios.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-              <button
-                onClick={async () => {
-                  if (targetPortfolio === null) return;
-                  const qty = window.prompt(`Stückzahl für ${symbol}?`, "10");
-                  if (!qty) return;
-                  setRunResult(null);
-                  try {
-                    const res = await api.post(`/api/portfolios/${targetPortfolio}/positions`, {
-                      symbol, quantity: parseFloat(qty.replace(",", ".")),
-                    });
-                    setRunResult(`✅ ${symbol} gekauft zu ${res.entry_price}.`);
-                  } catch (e: any) {
-                    setRunResult(`❌ ${e.message}`);
-                  }
-                }}
-                className="rounded border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-emerald-500"
-              >
-                Kaufen
-              </button>
-            </span>
-          )}
+          <button
+            onClick={() => setBuyOpen(true)}
+            className="rounded border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-emerald-500"
+          >
+            Kaufen
+          </button>
           <button
             onClick={runNow}
             disabled={running}
@@ -176,6 +149,16 @@ export default function AssetPage() {
       </div>
       {error && <p className="text-sm text-rose-400">{error}</p>}
       {runResult && <p className="text-sm text-amber-400">{runResult}</p>}
+
+      {buyOpen && (
+        <BuyDialog
+          symbol={symbol}
+          targetPrice={latestSignal?.target_price}
+          stopPrice={latestSignal?.stop_price}
+          onClose={() => setBuyOpen(false)}
+          onBought={(msg) => setRunResult(msg)}
+        />
+      )}
 
       <div className="flex gap-2">
         {[

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api, runAnalysis } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
 import AnalysisLamp from "@/components/AnalysisLamp";
+import BuyDialog from "@/components/BuyDialog";
 
 type ScreenerRow = {
   symbol: string;
@@ -50,6 +51,7 @@ export default function TopSignalsPage() {
   const [targetPortfolio, setTargetPortfolio] = useState<number | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [rowStatus, setRowStatus] = useState<Record<string, string>>({});
+  const [buySymbol, setBuySymbol] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -129,22 +131,12 @@ export default function TopSignalsPage() {
     }
   }
 
-  async function toPortfolio(row: ScreenerRow) {
-    if (targetPortfolio === null) {
+  function toPortfolio(row: ScreenerRow) {
+    if (portfolios.length === 0) {
       setMsg("Zuerst ein Portfolio anlegen (Seite „Portfolios“).");
       return;
     }
-    const qty = window.prompt(`Stückzahl für ${row.symbol} (Kurs ~${row.close ?? "?"})`, "10");
-    if (!qty) return;
-    try {
-      const res = await api.post(`/api/portfolios/${targetPortfolio}/positions`, {
-        symbol: row.symbol,
-        quantity: parseFloat(qty.replace(",", ".")),
-      });
-      setMsg(`${row.symbol} gekauft zu ${res.entry_price} → Portfolio.`);
-    } catch (e: any) {
-      setMsg(e.message);
-    }
+    setBuySymbol(row.symbol);
   }
 
   if (error) return <p className="text-rose-400">Fehler: {error}</p>;
@@ -194,6 +186,15 @@ export default function TopSignalsPage() {
           </label>
         )}
       </div>
+
+      {buySymbol && (
+        <BuyDialog
+          symbol={buySymbol}
+          defaultPortfolioId={targetPortfolio}
+          onClose={() => setBuySymbol(null)}
+          onBought={(m) => setMsg(m)}
+        />
+      )}
 
       {data?.run_at && (
         <p className="text-xs text-slate-500">

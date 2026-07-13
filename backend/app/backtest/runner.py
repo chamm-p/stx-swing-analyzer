@@ -34,6 +34,8 @@ async def start_run(payload: dict) -> uuid.UUID:
     """Legt den Lauf an und startet die Ausführung als Hintergrund-Task."""
     params = {k: v for k, v in (payload.get("params") or {}).items()
               if k in _PARAM_KEYS and v is not None}
+    grid = {k: v for k, v in (payload.get("grid") or {}).items()
+            if k in _PARAM_KEYS and isinstance(v, list) and v}
     async with SessionLocal() as db:
         run = BacktestRun(
             status="running",
@@ -42,7 +44,12 @@ async def start_run(payload: dict) -> uuid.UUID:
             days=int(payload.get("days") or 730),
             params={**params,
                     "platform_id": payload.get("platform_id"),
-                    "backfill": bool(payload.get("backfill"))},
+                    "backfill": bool(payload.get("backfill")),
+                    "mode": payload.get("mode") or "single",
+                    "grid": grid,
+                    "train_days": int(payload.get("train_days") or 365),
+                    "test_days": int(payload.get("test_days") or 90),
+                    "min_trades": int(payload.get("min_trades") or 20)},
         )
         db.add(run)
         await db.commit()
@@ -62,6 +69,11 @@ async def _execute(run_id: uuid.UUID) -> None:
             stored = dict(run.params or {})
             platform_id = stored.pop("platform_id", None)
             do_backfill = stored.pop("backfill", False)
+            mode = stored.pop("mode", "single")
+            grid = stored.pop("grid", {}) or {}
+            train_days = stored.pop("train_days", 365)
+            test_days = stored.pop("test_days", 90)
+            min_trades = stored.pop("min_trades", 20)
             overrides = {k: v for k, v in stored.items() if k in _PARAM_KEYS}
 
             q = select(UniverseSymbol).where(UniverseSymbol.active == True)  # noqa: E712
@@ -93,6 +105,44 @@ async def _execute(run_id: uuid.UUID) -> None:
             if platform_id:
                 platform = await db.get(TradingPlatform, platform_id)
                 fees = platform.fees if platform else None
+
+            if mode == "walkforward":
+                from app.backtest.walkforward import walk_forward
+                base_params = StrategyConfig(**overrides).to_dict()
+                base_params.pop("fees", None)
+                wf = await asyncio.to_thread(
+                    walk_forward, data, base_params, grid,
+                    currencies=currencies, fees=fees,
+                    train_days=train_days, test_days=test_days,
+                    min_trades=min_trades,
+                )
+                metrics = {**wf["oos"], "mode": "walkforward",
+                           "symbols_tested": len(data),
+                           "windows": wf["windows"],
+                           "param_wins": wf["param_wins"]}
+                run.metrics = metrics
+                run.equity = wf["equity"]
+                run.trades = []
+                run.warnings = []
+                # SPY-Benchmark über den Out-of-Sample-Zeitraum
+                if wf["equity"]:
+                    spy = await load_ohlcv_df(db, "SPY", days=run.days)
+                    if not spy.empty:
+                        start_ts = pd.Timestamp(wf["equity"][0]["time"], tz="UTC")
+                        end_ts = pd.Timestamp(wf["equity"][-1]["time"], tz="UTC")
+                        window = spy.loc[(spy.index >= start_ts) & (spy.index <= end_ts), "close"]
+                        if len(window) > 1:
+                            base = float(window.iloc[0])
+                            start_cap = float(overrides.get("start_capital") or 10_000)
+                            run.benchmark = _downsample(window / base * start_cap)
+                            metrics["benchmark_return_pct"] = round(
+                                (float(window.iloc[-1]) / base - 1) * 100, 2)
+                run.status = "done"
+                logger.info("Walk-Forward %s fertig: %s Fenster, OOS %s%%",
+                            run_id, metrics.get("windows_tested"),
+                            metrics.get("total_return_pct"))
+                await db.commit()
+                return
 
             config = StrategyConfig(**overrides, fees=fees)
             result = await asyncio.to_thread(run_backtest, data, config, currencies)

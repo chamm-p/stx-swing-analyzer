@@ -56,7 +56,7 @@ def compute_metrics(result: BacktestResult) -> dict:
         out["fees_total"] = round(sum(t.fee_buy + t.fee_sell for t in result.trades), 2)
         out["exit_reasons"] = {
             reason: sum(1 for t in trades if t.reason == reason)
-            for reason in ("target", "stop", "horizon", "signal")
+            for reason in ("target", "stop", "horizon", "signal", "window_end")
         }
     return out
 

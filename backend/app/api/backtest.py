@@ -22,6 +22,12 @@ class BacktestRequest(BaseModel):
     backfill: bool = False
     platform_id: int | None = None
     params: dict = Field(default_factory=dict)  # StrategyConfig-Overrides
+    # Walk-Forward
+    mode: str = Field(default="single", pattern="^(single|walkforward)$")
+    grid: dict = Field(default_factory=dict)  # {param: [werte…]}
+    train_days: int = Field(default=365, ge=90, le=1825)
+    test_days: int = Field(default=90, ge=30, le=365)
+    min_trades: int = Field(default=20, ge=0, le=500)
 
 
 @router.post("/backtest/run", status_code=202)
