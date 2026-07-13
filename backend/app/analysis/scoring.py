@@ -28,6 +28,11 @@ class ScoringProfile:
     rsi_scale: float    # Divisor für die Skalierung jenseits der Schwellen
     macd_scale: float   # Multiplikator für hist/close-Normierung
     use_crypto_threshold: bool = False
+    # Gewichte der Technik-Komponenten (kalibrierbar via Backtesting)
+    w_rsi: float = 0.25
+    w_macd: float = 0.25
+    w_bollinger: float = 0.2
+    w_trend: float = 0.3
 
 
 PROFILES = {
@@ -100,7 +105,8 @@ def technical_score(ind: dict, profile: ScoringProfile = PROFILES["stock"]) -> t
     if not components:
         return 0.0, components
     # Gewichtung: Mean-Reversion (RSI/BB) und Trend/Momentum (MACD/MAs) gleichrangig.
-    weights = {"rsi": 0.25, "macd": 0.25, "bollinger": 0.2, "trend": 0.3}
+    weights = {"rsi": profile.w_rsi, "macd": profile.w_macd,
+               "bollinger": profile.w_bollinger, "trend": profile.w_trend}
     total_w = sum(weights[k] for k in components)
     score = sum(components[k] * weights[k] for k in components) / total_w
     return round(score, 4), {k: round(v, 4) for k, v in components.items()}
