@@ -27,7 +27,15 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="stx-swing-analyzer", lifespan=lifespan)
+# Docs unter /api/*, damit sie durch den Frontend-Proxy erreichbar sind
+# (der Backend-Port ist nicht veröffentlicht).
+app = FastAPI(
+    title="stx-swing-analyzer",
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+    redoc_url=None,
+)
 
 # Auth unter /api/auth, damit der Next.js-Proxy (/api/*) alles abdeckt.
 app.include_router(auth_router, prefix="/api")

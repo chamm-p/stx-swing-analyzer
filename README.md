@@ -116,8 +116,8 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-- Frontend: http://localhost:7800
-- Backend-API: http://localhost:7810/docs (Swagger)
+- Frontend: http://localhost:5800
+- API-Docs (Swagger): http://localhost:5800/api/docs — läuft durch den Frontend-Proxy; Backend, DB und Redis sind nicht veröffentlicht
 
 Erster Schritt im UI: unter **Watchlist** Symbole hinzufügen (Yahoo-Notation,
 z.B. `AAPL`, `SAP.DE`, `IWDA.AS`). Der Worker lädt dann Kursdaten, ordnet

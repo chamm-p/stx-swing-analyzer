@@ -38,8 +38,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports:
-      - "${BACKEND_PORT:-7810}:8000"
 
   worker:
     build: ./backend
@@ -63,7 +61,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "${FRONTEND_PORT:-7800}:3000"
+      - "${FRONTEND_PORT:-5800}:3000"
 
 volumes:
   db_data:
