@@ -31,7 +31,12 @@ export default function DashboardPage() {
       </div>
 
       <section>
-        <h2 className="mb-3 text-lg font-semibold">Aktuelle Signale</h2>
+        <h2 className="mb-3 text-lg font-semibold">
+          Aktuelle Einschätzung je Wert
+          <span className="ml-2 text-xs font-normal text-slate-500">
+            (Signal-Historie auf der jeweiligen Asset-Seite)
+          </span>
+        </h2>
         {data.recent_signals.length === 0 ? (
           <p className="text-slate-500">
             Noch keine Signale. Assets zur <Link href="/watchlist" className="text-sky-400 underline">Watchlist</Link>{" "}

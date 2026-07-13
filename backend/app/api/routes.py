@@ -516,11 +516,21 @@ async def symbol_search(q: str):
 async def dashboard(db: AsyncSession = Depends(get_db)):
     from app.analysis.watch_scope import effective_symbols
 
-    # Nur explizit beobachtete Werte im Dashboard — Ad-hoc-Analysen
-    # (immer-on-demand) sollen die Übersicht nicht fluten
+    # Nur explizit beobachtete Werte, und je Wert nur die AKTUELLSTE
+    # Einschätzung — Historie gehört auf die Asset-Seite, nicht ins
+    # Dashboard (Postgres DISTINCT ON pro Symbol).
     scope = await effective_symbols(db)
+    latest_per_symbol = (
+        select(Signal)
+        .where(Signal.symbol.in_(scope))
+        .distinct(Signal.symbol)
+        .order_by(Signal.symbol, desc(Signal.ts))
+        .subquery()
+    )
+    from sqlalchemy.orm import aliased
+    LatestSignal = aliased(Signal, latest_per_symbol)
     signals = await db.execute(
-        select(Signal).where(Signal.symbol.in_(scope)).order_by(desc(Signal.ts)).limit(20)
+        select(LatestSignal).order_by(desc(latest_per_symbol.c.ts)).limit(50)
     )
     watch_count = len(scope)
     news_24h = await db.scalar(
