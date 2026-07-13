@@ -44,10 +44,12 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
 
     llm = await LLMClient.create(db)
 
-    # 1) Sentiment für neue Artikel
+    # 1) Sentiment für neue Artikel — ohne Artikel ist Sentiment „nicht
+    #    verfügbar" (None), NICHT neutral: das Gewicht wird dann im
+    #    Scoring auf die vorhandenen Komponenten renormalisiert
     await analyze_pending_sentiment(db, llm, symbol, asset.name)
     articles = await recent_scored_articles(db, symbol)
-    sentiment = aggregate_sentiment(articles)
+    sentiment = aggregate_sentiment(articles) if articles else None
 
     # 1b) Anstehende Termine (Quartalszahlen, Ex-Dividende, Biotech-
     #     Katalysatoren) — Event-Risiko
@@ -92,13 +94,16 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
         if parts:
             events_text = "; ".join(parts)
 
-    # 2) LLM-Gesamteinschätzung (fundamental) — fail-soft auf neutral
-    fundamental, review = 0.0, {}
+    # 2) LLM-Gesamteinschätzung — fundamental_score zählt nur, wenn es
+    #    eine Nachrichten-/Termin-Basis gibt; ohne die wäre er nur ein
+    #    Echo der Technik (Doppelzählung). Fehler → nicht verfügbar.
+    fundamental, review = None, {}
     try:
         review = await asset_review(db, llm, asset, snapshot, articles, events_text=events_text)
-        fundamental = max(-1.0, min(1.0, float(review.get("fundamental_score", 0.0))))
+        if articles or events_text != "(keine bekannt)":
+            fundamental = max(-1.0, min(1.0, float(review.get("fundamental_score", 0.0))))
     except (LLMError, ValueError, TypeError) as e:
-        logger.warning("Asset-Review fehlgeschlagen für %s: %s — fundamental=0", symbol, e)
+        logger.warning("Asset-Review fehlgeschlagen für %s: %s — fundamental n/a", symbol, e)
 
     # 3) Regelbasiertes Scoring (Profil nach Asset-Klasse: stock/crypto)
     asset_class = "crypto" if asset.asset_type == "crypto" else "stock"
@@ -145,8 +150,10 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
     rationale_parts = [
         f"Technisch {result.technical:+.2f} [Profil {result.profile}] (" +
         ", ".join(f"{k} {v:+.2f}" for k, v in result.components.items()) + ")",
-        f"Sentiment {result.sentiment:+.2f} aus {len(articles)} News",
-        f"Fundamental {result.fundamental:+.2f}",
+        (f"Sentiment {result.sentiment:+.2f} aus {len(articles)} News"
+         if result.sentiment is not None else "Sentiment n/a (keine News)"),
+        (f"Fundamental {result.fundamental:+.2f}"
+         if result.fundamental is not None else "Fundamental n/a"),
     ]
     if targets:
         rationale_parts.append(

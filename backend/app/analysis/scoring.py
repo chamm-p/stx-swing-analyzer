@@ -48,8 +48,8 @@ class ScoringResult:
     confidence: float  # 0..1
     composite: float  # -1..1
     technical: float
-    sentiment: float
-    fundamental: float
+    sentiment: float | None  # None = keine News-Basis
+    fundamental: float | None  # None = nicht verfügbar
     components: dict  # Einzelregeln für die Begründung
     profile: str = "stock"
 
@@ -147,18 +147,28 @@ def effective_threshold(profile: ScoringProfile) -> float:
     return s.score_threshold_crypto if profile.use_crypto_threshold else s.score_threshold
 
 
-def score_signal(indicator_snapshot: dict, sentiment: float, fundamental: float,
+def score_signal(indicator_snapshot: dict, sentiment: float | None,
+                 fundamental: float | None,
                  asset_class: str = "stock") -> ScoringResult:
+    """Composite-Score mit verfügbarkeitsbasierter Gewichtung.
+
+    sentiment/fundamental = None heißt „nicht verfügbar" (z.B. keine
+    News zum Wert) — dann wird das Gewicht auf die vorhandenen
+    Komponenten renormalisiert. Fehlende Daten dürfen den Score nicht
+    wie neutrale Daten stauchen: Ein Wert ohne Nachrichtenlage ist ein
+    rein technisches Signal (wie im Screener), kein halbiertes."""
     s = get_settings()
     profile = get_profile(asset_class)
     tech, components = technical_score(indicator_snapshot, profile)
     threshold = effective_threshold(profile)
 
-    composite = (
-        s.score_weight_technical * tech
-        + s.score_weight_sentiment * sentiment
-        + s.score_weight_fundamental * fundamental
-    )
+    parts: list[tuple[float, float]] = [(tech, s.score_weight_technical)]
+    if sentiment is not None:
+        parts.append((sentiment, s.score_weight_sentiment))
+    if fundamental is not None:
+        parts.append((fundamental, s.score_weight_fundamental))
+    total_weight = sum(w for _, w in parts)
+    composite = sum(v * w for v, w in parts) / total_weight if total_weight else 0.0
     composite = max(-1.0, min(1.0, composite))
 
     if composite >= threshold:
@@ -171,7 +181,8 @@ def score_signal(indicator_snapshot: dict, sentiment: float, fundamental: float,
     # Confidence: Stärke des Composite, mit Bonus wenn alle Teil-Scores
     # in dieselbe Richtung zeigen (Agreement).
     confidence = min(1.0, abs(composite) / max(threshold * 2, 0.01))
-    directions = [v for v in (tech, sentiment, fundamental) if abs(v) > 0.1]
+    directions = [v for v in (tech, sentiment, fundamental)
+                  if v is not None and abs(v) > 0.1]
     if len(directions) >= 2 and (all(d > 0 for d in directions) or all(d < 0 for d in directions)):
         confidence = min(1.0, confidence + 0.15)
 
@@ -181,7 +192,7 @@ def score_signal(indicator_snapshot: dict, sentiment: float, fundamental: float,
         composite=round(composite, 4),
         technical=tech,
         sentiment=sentiment,
-        fundamental=round(fundamental, 4),
+        fundamental=round(fundamental, 4) if fundamental is not None else None,
         components=components,
         profile=profile.name,
     )

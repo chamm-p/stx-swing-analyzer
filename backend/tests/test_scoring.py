@@ -79,6 +79,24 @@ class TestScoreSignal:
             assert crypto.composite < effective_threshold(get_profile("crypto")) or \
                 crypto.action == "BUY"
 
+    def test_renormalisierung_ohne_news(self):
+        # Ohne Sentiment/Fundamental (None) zählt die Technik voll —
+        # fehlende Daten dürfen den Composite nicht stauchen
+        snap = snapshot(rsi14=25.0, close=91.0, macd_hist=0.5,
+                        macd_hist_prev=0.3, sma50=90.0, sma200=85.0)
+        voll = score_signal(snap, sentiment=None, fundamental=None)
+        gemischt = score_signal(snap, sentiment=0.0, fundamental=0.0)
+        assert abs(voll.composite - voll.technical) < 1e-6
+        assert voll.composite > gemischt.composite  # echtes Neutral staucht, None nicht
+        assert voll.sentiment is None and voll.fundamental is None
+
+    def test_renormalisierung_teilweise(self):
+        # Nur Fundamental fehlt: (0.5·tech + 0.3·sent) / 0.8
+        snap = snapshot()
+        r = score_signal(snap, sentiment=0.8, fundamental=None)
+        erwartet = (0.5 * r.technical + 0.3 * 0.8) / 0.8
+        assert abs(r.composite - round(max(-1, min(1, erwartet)), 4)) < 1e-3
+
     def test_composite_gewichtung(self):
         # Nur Sentiment/Fundamental, Technik neutralisieren wir nicht exakt —
         # aber die Richtung muss stimmen
