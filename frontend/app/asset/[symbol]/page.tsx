@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { api, Signal } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
 import PriceChart from "@/components/PriceChart";
@@ -32,6 +32,7 @@ type Profile = {
 
 export default function AssetPage() {
   const { symbol } = useParams<{ symbol: string }>();
+  const router = useRouter();
   const [chart, setChart] = useState<ChartData | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
@@ -66,6 +67,14 @@ export default function AssetPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
+        <button
+          onClick={() => (window.history.length > 1 ? router.back() : router.push("/"))}
+          title="Zurück"
+          aria-label="Zurück"
+          className="rounded-full border border-slate-700 px-3 py-1.5 text-lg leading-none text-slate-300 hover:border-sky-500 hover:text-white"
+        >
+          ←
+        </button>
         <div>
           <h1 className="text-2xl font-bold">{symbol}</h1>
           {profile && (
