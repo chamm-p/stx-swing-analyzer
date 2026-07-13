@@ -48,10 +48,31 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
     articles = await recent_scored_articles(db, symbol)
     sentiment = aggregate_sentiment(articles)
 
+    # 1b) Anstehende Termine (Quartalszahlen, Ex-Dividende) — Event-Risiko
+    events: dict = {}
+    events_text = "(keine bekannt)"
+    next_earnings: str | None = None
+    if asset.asset_type != "crypto":
+        try:
+            from app.sources.yahoo import fetch_events
+            events = await fetch_events(symbol)
+            today = utcnow().date().isoformat()
+            upcoming = [d for d in events.get("earnings_dates", []) if d >= today]
+            next_earnings = upcoming[0] if upcoming else None
+            parts = []
+            if next_earnings:
+                parts.append(f"Quartalszahlen am {next_earnings}")
+            if events.get("ex_dividend_date") and events["ex_dividend_date"] >= today:
+                parts.append(f"Ex-Dividende am {events['ex_dividend_date']}")
+            if parts:
+                events_text = "; ".join(parts)
+        except Exception as e:
+            logger.warning("Termine für %s nicht abrufbar: %s", symbol, e)
+
     # 2) LLM-Gesamteinschätzung (fundamental) — fail-soft auf neutral
     fundamental, review = 0.0, {}
     try:
-        review = await asset_review(db, llm, asset, snapshot, articles)
+        review = await asset_review(db, llm, asset, snapshot, articles, events_text=events_text)
         fundamental = max(-1.0, min(1.0, float(review.get("fundamental_score", 0.0))))
     except (LLMError, ValueError, TypeError) as e:
         logger.warning("Asset-Review fehlgeschlagen für %s: %s — fundamental=0", symbol, e)
@@ -113,6 +134,14 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
         )
     if analyst.get("mean"):
         rationale_parts.append(f"Analysten-Konsens {analyst['mean']} ({analyst.get('count')} Schätzungen)")
+    if next_earnings:
+        from datetime import date
+        days_to = (date.fromisoformat(next_earnings) - utcnow().date()).days
+        if 0 <= days_to <= horizon_days:
+            rationale_parts.append(
+                f"⚠️ Quartalszahlen am {next_earnings} (in {days_to} Tagen) — "
+                f"Event-Risiko im Signalhorizont"
+            )
     if review.get("summary"):
         rationale_parts.append(str(review["summary"]))
 

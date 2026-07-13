@@ -149,6 +149,43 @@ async def fetch_profile(symbol: str) -> dict:
     return profile
 
 
+def _fetch_calendar_sync(symbol: str) -> dict:
+    try:
+        return yf.Ticker(symbol).calendar or {}
+    except Exception:
+        return {}
+
+
+async def fetch_events(symbol: str) -> dict:
+    """Anstehende Unternehmens-Termine (Yahoo): Quartalszahlen,
+    Ex-Dividende, Dividendenzahlung. Redis-gecacht (12h), fail-soft leer."""
+    import json
+
+    from app.services_redis import get_redis
+
+    r = get_redis()
+    cache_key = f"events:{symbol}"
+    cached = await r.get(cache_key)
+    if cached is not None:
+        return json.loads(cached)
+
+    cal = await asyncio.to_thread(_fetch_calendar_sync, symbol)
+
+    def iso(value) -> str | None:
+        return value.isoformat() if hasattr(value, "isoformat") else None
+
+    earnings = cal.get("Earnings Date") or []
+    if not isinstance(earnings, (list, tuple)):
+        earnings = [earnings]
+    out = {
+        "earnings_dates": sorted(d for d in (iso(x) for x in earnings) if d),
+        "ex_dividend_date": iso(cal.get("Ex-Dividend Date")),
+        "dividend_date": iso(cal.get("Dividend Date")),
+    }
+    await r.set(cache_key, json.dumps(out), ex=43200)
+    return out
+
+
 async def fetch_analyst_targets(symbol: str) -> dict:
     """Analysten-Konsensziele (Yahoo) — Redis-gecacht (24h), fail-soft leer.
 

@@ -21,6 +21,12 @@ type NewsItem = {
 
 type Analysis = { id: string; ts: string; model: string | null; payload: any };
 
+type Events = {
+  earnings_dates: string[];
+  ex_dividend_date: string | null;
+  dividend_date: string | null;
+};
+
 type Profile = {
   symbol: string; name: string; sector: string | null; industry: string | null;
   employees: number | null; website: string | null; city: string | null; country: string | null;
@@ -37,6 +43,7 @@ export default function AssetPage() {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [events, setEvents] = useState<Events | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [rangeDays, setRangeDays] = useState(365);
   const [running, setRunning] = useState(false);
@@ -48,6 +55,7 @@ export default function AssetPage() {
     api.get(`/api/assets/${symbol}/news`).then(setNews).catch(() => {});
     api.get(`/api/assets/${symbol}/analyses`).then(setAnalyses).catch(() => {});
     api.get(`/api/assets/${symbol}/profile`).then(setProfile).catch(() => {});
+    api.get(`/api/assets/${symbol}/events`).then(setEvents).catch(() => {});
   }, [symbol, rangeDays]);
   useEffect(load, [load]);
 
@@ -149,6 +157,8 @@ export default function AssetPage() {
           ))}
         </div>
       )}
+
+      <EventsBar events={events} />
 
       {profile && (
         <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
@@ -291,6 +301,34 @@ function ProfileStat({ label, value }: { label: string; value: React.ReactNode }
     <div className="rounded border border-slate-800 bg-slate-900/40 p-2">
       <div className="truncate text-sm font-semibold">{value}</div>
       <div className="text-xs text-slate-500">{label}</div>
+    </div>
+  );
+}
+
+function EventsBar({ events }: { events: Events | null }) {
+  if (!events) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const nextEarnings = (events.earnings_dates || []).filter((d) => d >= today)[0];
+  const exDiv = events.ex_dividend_date && events.ex_dividend_date >= today ? events.ex_dividend_date : null;
+  if (!nextEarnings && !exDiv) return null;
+
+  const daysTo = (d: string) =>
+    Math.round((new Date(d).getTime() - new Date(today).getTime()) / 86400000);
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-sm">
+      <span className="text-xs font-semibold text-amber-400">📅 Termine</span>
+      {nextEarnings && (
+        <span className="text-slate-300">
+          Quartalszahlen: <span className="font-semibold">{new Date(nextEarnings).toLocaleDateString("de-DE")}</span>
+          <span className="ml-1 text-xs text-amber-400">(in {daysTo(nextEarnings)} Tagen{daysTo(nextEarnings) <= 14 ? " — Event-Risiko" : ""})</span>
+        </span>
+      )}
+      {exDiv && (
+        <span className="text-slate-300">
+          Ex-Dividende: <span className="font-semibold">{new Date(exDiv).toLocaleDateString("de-DE")}</span>
+        </span>
+      )}
     </div>
   );
 }

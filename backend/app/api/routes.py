@@ -313,6 +313,16 @@ async def asset_profile(symbol: str, db: AsyncSession = Depends(get_db)):
     return profile
 
 
+@router.get("/assets/{symbol}/events")
+async def asset_events(symbol: str):
+    """Anstehende Termine (Quartalszahlen, Dividende) — Redis-gecacht (12h)."""
+    try:
+        return await yahoo.fetch_events(symbol.upper())
+    except Exception as e:
+        logger.warning("Termine für %s nicht abrufbar: %s", symbol, e)
+        return {"earnings_dates": [], "ex_dividend_date": None, "dividend_date": None}
+
+
 @router.get("/assets/{symbol}/news")
 async def asset_news(symbol: str, limit: int = 30, db: AsyncSession = Depends(get_db)):
     result = await db.execute(

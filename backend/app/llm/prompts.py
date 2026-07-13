@@ -36,6 +36,9 @@ Letzter Schlusskurs: {last_close}
 Technische Indikatoren (aktuell):
 {indicators}
 
+Anstehende Termine (Event-Risiko im Swing-Horizont beachten!):
+{events}
+
 News der letzten Tage (mit LLM-Sentiment-Scores):
 {news_block}
 

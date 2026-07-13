@@ -76,7 +76,8 @@ async def recent_scored_articles(db: AsyncSession, symbol: str, limit: int = 15)
 
 
 async def asset_review(db: AsyncSession, llm: LLMClient, asset: Asset,
-                       indicator_snapshot: dict, articles: list[dict]) -> dict:
+                       indicator_snapshot: dict, articles: list[dict],
+                       events_text: str = "(keine bekannt)") -> dict:
     """Gesamteinschätzung (fundamental_score, Begründungstexte) per LLM."""
     indicators_text = "\n".join(f"  {k}: {v}" for k, v in indicator_snapshot.items() if v is not None)
     data = await llm.complete_json(
@@ -86,6 +87,7 @@ async def asset_review(db: AsyncSession, llm: LLMClient, asset: Asset,
             name=asset.name or asset.symbol,
             last_close=indicator_snapshot.get("close", "?"),
             indicators=indicators_text or "(keine)",
+            events=events_text,
             news_block=prompts.format_news_block(articles),
         ),
     )
