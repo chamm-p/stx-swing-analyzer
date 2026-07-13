@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     llm_reasoning_mode: str = "none"
     llm_cache_ttl: int = 86400
     llm_max_tokens: int = 1500
-    llm_temperature: float = 0.2
+    # 0 = deterministisch — wichtig gegen Signal-Flattern durch LLM-Varianz
+    llm_temperature: float = 0.0
 
     # Marktdaten
     alpha_vantage_api_key: str = ""
@@ -52,6 +53,10 @@ class Settings(BaseSettings):
     score_threshold: float = 0.35
     # Höhere Schwelle für Krypto — mehr Grundrauschen im 24/7-Markt
     score_threshold_crypto: float = 0.45
+    # Hysterese gegen Signal-Flattern: Ein bestehendes BUY/SELL kippt erst
+    # zurück auf HOLD, wenn der Composite um diesen Betrag UNTER die
+    # Schwelle fällt (Einstieg: >= Schwelle, Ausstieg: < Schwelle - Hysterese)
+    signal_hysteresis: float = 0.10
 
     # Retention
     retention_ohlcv_days: int = 730

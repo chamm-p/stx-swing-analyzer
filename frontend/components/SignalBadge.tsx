@@ -7,7 +7,9 @@ export default function SignalBadge({ action, confidence }: { action: string; co
   return (
     <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-semibold ${styles[action] || styles.HOLD}`}>
       {action}
-      {confidence !== undefined && <span className="opacity-70">{Math.round(confidence * 100)}%</span>}
+      {confidence !== undefined && action !== "HOLD" && (
+        <span className="opacity-70">{Math.round(confidence * 100)}%</span>
+      )}
     </span>
   );
 }
