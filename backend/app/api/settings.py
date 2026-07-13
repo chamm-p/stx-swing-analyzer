@@ -123,6 +123,27 @@ async def test_comm(payload: CommTest, db: AsyncSession = Depends(get_db)):
     return {"ok": True, "channel": payload.channel}
 
 
+@router.get("/settings/mcp")
+async def get_mcp(db: AsyncSession = Depends(get_db)):
+    """Liefert das effektive MCP-Token im Klartext — anders als andere
+    Secrets muss es zum Einrichten externer Adapter kopierbar sein."""
+    cfg = await load_settings(db, "mcp")
+    return {"token": cfg.get("token") or None}
+
+
+@router.post("/settings/mcp/generate")
+async def generate_mcp_token(db: AsyncSession = Depends(get_db)):
+    """Erzeugt ein neues MCP-Token (ersetzt das bisherige sofort)."""
+    import secrets
+
+    from app.services_settings import invalidate_mcp_cache
+
+    token = secrets.token_urlsafe(24)
+    await save_settings(db, "mcp", {"token": token})
+    invalidate_mcp_cache()
+    return {"token": token}
+
+
 @router.delete("/settings/{key}")
 async def reset_settings(key: str, db: AsyncSession = Depends(get_db)):
     """Setzt eine Sektion auf die .env-Defaults zurück (löscht Overrides
@@ -135,6 +156,9 @@ async def reset_settings(key: str, db: AsyncSession = Depends(get_db)):
     if row:
         await db.delete(row)
         await db.commit()
+    if key == "mcp":
+        from app.services_settings import invalidate_mcp_cache
+        invalidate_mcp_cache()
     return await public_view(db, key)
 
 

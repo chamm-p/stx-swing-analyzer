@@ -159,9 +159,13 @@ Single-User-Gate.
 
 Das Backend exponiert einen **MCP-Server** (Streamable HTTP, Muster aus
 cura-stro) unter `http://<host>:5800/api/mcp` — läuft durch den
-Frontend-Proxy, kein zusätzlicher Port. Aktivierung: `MCP_TOKEN` in der
-`.env` setzen (`openssl rand -hex 24`); Auth per Header `x-stx-token`
-oder `Authorization: Bearer <token>`.
+Frontend-Proxy, kein zusätzlicher Port. Aktivierung am einfachsten über
+**Einstellungen → MCP-Connector**: Token generieren und die fertigen
+Snippets (Endpoint, Claude-Code-Befehl, mcp-remote-JSON) kopieren.
+Alternativ `MCP_TOKEN` in der `.env` setzen (`openssl rand -hex 24`) —
+ein UI-generiertes Token hat Vorrang. Auth per Header `x-stx-token`
+oder `Authorization: Bearer <token>`; ohne Token ist der Endpunkt
+deaktiviert.
 
 Tools: `get_signals`, `get_top_signals` (Screener, filterbar nach
 US/DAX/CRYPTO), `get_watchlist`, `get_asset_analysis` (Indikatoren +

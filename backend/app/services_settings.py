@@ -51,6 +51,9 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "model": ("llm_model", False),
         "api_key": ("llm_api_key", True),
     },
+    "mcp": {
+        "token": ("mcp_token", True),
+    },
     "comm": {
         "smtp_host": ("smtp_host", False),
         "smtp_port": ("smtp_port", False),
@@ -106,6 +109,28 @@ async def save_settings(db: AsyncSession, key: str, payload: dict) -> dict:
         row.value = stored
     await db.commit()
     return await load_settings(db, key)
+
+
+# --- MCP-Token mit Prozess-Cache (Guard läuft bei jedem /api/mcp-Request) ---
+
+_mcp_cache: dict = {"token": None, "ts": 0.0}
+_MCP_CACHE_TTL = 30.0
+
+
+async def current_mcp_token() -> str:
+    """Effektives MCP-Token (DB-Override vor Env), 30s gecacht."""
+    import time
+    now = time.time()
+    if _mcp_cache["token"] is None or now - _mcp_cache["ts"] > _MCP_CACHE_TTL:
+        from app.database import SessionLocal
+        async with SessionLocal() as db:
+            cfg = await load_settings(db, "mcp")
+        _mcp_cache.update(token=cfg.get("token") or "", ts=now)
+    return _mcp_cache["token"]
+
+
+def invalidate_mcp_cache() -> None:
+    _mcp_cache["token"] = None
 
 
 async def public_view(db: AsyncSession, key: str) -> dict:

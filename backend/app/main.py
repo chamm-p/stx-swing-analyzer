@@ -13,7 +13,6 @@ from app.api.routes import router as api_router
 from app.api.screener import router as screener_router
 from app.api.settings import router as settings_router
 from app.auth.routes import router as auth_router
-from app.config import get_settings
 from app.database import init_db, SessionLocal
 from app.mcp_server import mcp as mcp_server
 from app.sources.rss import seed_default_sources
@@ -55,7 +54,8 @@ async def mcp_token_guard(request: Request, call_next):
     Header: ``x-stx-token`` oder ``Authorization: Bearer <token>``."""
     path = request.url.path
     if path == "/api/mcp" or path.startswith("/api/mcp/"):
-        token = get_settings().mcp_token
+        from app.services_settings import current_mcp_token
+        token = await current_mcp_token()
         if not token:
             return JSONResponse(
                 {"error": "MCP deaktiviert — MCP_TOKEN in der .env setzen."},

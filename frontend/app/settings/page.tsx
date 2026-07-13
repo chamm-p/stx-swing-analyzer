@@ -34,8 +34,122 @@ export default function SettingsPage() {
       </p>
       {llm && <LlmSection initial={llm} onSaved={load} />}
       {comm && <CommSection initial={comm} onSaved={load} />}
+      <McpSection />
       <SourcesSection />
     </div>
+  );
+}
+
+/* --------------------------------------------------------------- MCP */
+
+function McpSection() {
+  const [token, setToken] = useState<string | null>(null);
+  const [origin, setOrigin] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+    api.get("/api/settings/mcp").then((d) => setToken(d.token)).catch(() => {});
+  }, []);
+
+  async function generate() {
+    if (token && !confirm("Neues Token erzeugen? Bestehende MCP-Adapter verlieren sofort den Zugriff.")) return;
+    try {
+      const res = await api.post("/api/settings/mcp/generate");
+      setToken(res.token);
+      setMsg("Neues Token aktiv.");
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  async function copy(label: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      setMsg("Kopieren fehlgeschlagen — bitte manuell markieren.");
+    }
+  }
+
+  const url = `${origin}/api/mcp`;
+  const tok = token ?? "<TOKEN>";
+  const claudeCmd = `claude mcp add --transport http stx ${url} --header "x-stx-token: ${tok}"`;
+  const remoteJson = JSON.stringify(
+    {
+      mcpServers: {
+        stx: {
+          command: "npx",
+          args: ["mcp-remote", url, "--header", `x-stx-token: ${tok}`],
+        },
+      },
+    },
+    null,
+    2
+  );
+
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <h2 className="mb-1 font-semibold">🔌 MCP-Connector</h2>
+      <p className="mb-3 text-xs text-slate-500">
+        Externe LLM-Agenten (curai, Claude, …) greifen per MCP auf Signale, Screener, Portfolios
+        und Analysen zu. Auth über Token-Header — ohne Token ist der Endpunkt deaktiviert.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-col gap-1 text-xs text-slate-400">
+          Token
+          <div className="flex items-center gap-2">
+            <code className="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
+              {token ?? "— nicht gesetzt —"}
+            </code>
+            {token && (
+              <CopyBtn label="token" copied={copied} onClick={() => copy("token", token)} />
+            )}
+          </div>
+        </div>
+        <button onClick={generate}
+          className="self-end rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">
+          {token ? "Token neu generieren" : "Token generieren"}
+        </button>
+        <ResetButton section="mcp" onDone={() => api.get("/api/settings/mcp").then((d) => setToken(d.token))} />
+        {msg && <span className="self-end text-sm text-amber-400">{msg}</span>}
+      </div>
+
+      <div className="mt-4 space-y-3">
+        <Snippet label="Endpoint" text={url} copied={copied} onCopy={copy} />
+        <Snippet label="Claude Code" text={claudeCmd} copied={copied} onCopy={copy} />
+        <Snippet label="mcp-remote (JSON-Config für Adapter ohne Streamable-HTTP)" text={remoteJson} copied={copied} onCopy={copy} />
+      </div>
+    </section>
+  );
+}
+
+function Snippet({ label, text, copied, onCopy }: {
+  label: string; text: string; copied: string | null;
+  onCopy: (label: string, text: string) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-2 text-xs text-slate-400">
+        {label}
+        <CopyBtn label={label} copied={copied} onClick={() => onCopy(label, text)} />
+      </div>
+      <pre className="overflow-x-auto rounded border border-slate-800 bg-slate-900 p-3 text-xs leading-relaxed">
+        {text}
+      </pre>
+    </div>
+  );
+}
+
+function CopyBtn({ label, copied, onClick }: { label: string; copied: string | null; onClick: () => void }) {
+  return (
+    <button onClick={onClick}
+      className="rounded border border-slate-700 px-2 py-0.5 text-xs text-slate-400 hover:border-sky-500 hover:text-sky-400">
+      {copied === label ? "✅ kopiert" : "📋 Copy"}
+    </button>
   );
 }
 
