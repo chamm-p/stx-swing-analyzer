@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import ThemeToggle from "@/components/ThemeToggle";
+import UserMenu from "@/components/UserMenu";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span className="ml-auto hidden text-xs text-slate-500 lg:block">
               Keine Anlageberatung
             </span>
+            <UserMenu />
             <ThemeToggle />
           </div>
         </nav>

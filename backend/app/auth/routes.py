@@ -9,9 +9,11 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from urllib.parse import urlencode, urlparse
+
 from app.auth import oidc_config
 from app.auth.deps import CurrentUser, require_user
-from app.auth.oidc_service import OidcError, OidcSvc
+from app.auth.oidc_service import OidcError, OidcSvc, _get_discovery
 from app.auth.session import COOKIE_NAME, create_session_token
 from app.config import get_settings
 from app.services_redis import get_redis
@@ -73,6 +75,34 @@ async def callback(request: Request, code: str = "", state: str = ""):
 @router.post("/logout")
 async def logout():
     resp = JSONResponse({"ok": True})
+    resp.delete_cookie(COOKIE_NAME, path="/")
+    return resp
+
+
+@router.get("/logout")
+async def logout_redirect():
+    """Abmelden inkl. IdP-Session (RP-initiated Logout).
+
+    Nur das App-Cookie zu löschen reicht nicht: Die SSO-Session beim IdP
+    bliebe bestehen und der nächste Login liefe still durch. Daher
+    Redirect auf den ``end_session_endpoint`` aus der Discovery (falls
+    vorhanden), zurück auf /logged-out. Fail-soft: ohne OIDC/Endpoint
+    landet man direkt auf /logged-out."""
+    cfg = oidc_config.load_config()
+    target = "/logged-out"
+    if cfg.is_usable:
+        try:
+            doc = await _get_discovery(cfg)
+            end_session = doc.get("end_session_endpoint")
+            if end_session:
+                params = {"client_id": cfg.client_id}
+                if cfg.redirect_uri:
+                    p = urlparse(cfg.redirect_uri)
+                    params["post_logout_redirect_uri"] = f"{p.scheme}://{p.netloc}/logged-out"
+                target = f"{end_session}?{urlencode(params)}"
+        except Exception as e:
+            logger.warning("end_session_endpoint nicht ermittelbar: %s", e)
+    resp = RedirectResponse(target)
     resp.delete_cookie(COOKIE_NAME, path="/")
     return resp
 
