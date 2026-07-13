@@ -22,7 +22,13 @@ logger = logging.getLogger(__name__)
 
 
 async def job_sync_market() -> None:
-    """Kurs-Sync für Watchlist + offene Portfolio-Positionen."""
+    """Kurs-Sync für Watchlist + offene Portfolio-Positionen.
+
+    Wiederholte Fehler pro Symbol lösen einen Ops-Alarm aus (Telegram/
+    E-Mail) — sonst fiele ein stiller Ausfall der Kursdaten erst auf,
+    wenn Signale auf veralteten Kursen basieren."""
+    from app.alerts.ops import track_failure, track_success
+
     async with SessionLocal() as db:
         wl = await db.execute(select(WatchlistItem.symbol))
         pos = await db.execute(
@@ -32,11 +38,17 @@ async def job_sync_market() -> None:
         for symbol in sorted(symbols):
             try:
                 await yahoo.sync_ohlcv(db, symbol)
+                await track_success(f"market:{symbol}")
             except Exception as e:
                 logger.error("Markt-Sync %s fehlgeschlagen: %s", symbol, e)
+                await track_failure(db, f"market:{symbol}", str(e),
+                                    subject=f"Kurs-Sync für {symbol}")
 
 
 async def job_sync_news() -> None:
+    from app.alerts.ops import track_failure, track_success
+    from app.models import DataSource
+
     async with SessionLocal() as db:
         try:
             await rss.fetch_all_sources(db)
@@ -46,6 +58,15 @@ async def job_sync_news() -> None:
             await rss.fetch_symbol_news(db)
         except Exception as e:
             logger.error("Symbol-News-Sync fehlgeschlagen: %s", e)
+
+        # Quellen-Gesundheit: wiederholt fehlschlagende Feeds melden
+        result = await db.execute(select(DataSource).where(DataSource.enabled == True))  # noqa: E712
+        for source in result.scalars().all():
+            if source.last_error:
+                await track_failure(db, f"news:{source.id}", source.last_error,
+                                    subject=f"News-Quelle „{source.name}“")
+            else:
+                await track_success(f"news:{source.id}")
 
 
 async def job_scan_universe() -> None:

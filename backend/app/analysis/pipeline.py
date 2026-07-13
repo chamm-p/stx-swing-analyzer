@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.alerts.dispatcher import dispatch_signal_alert
 from app.analysis.llm_analysis import analyze_pending_sentiment, asset_review, recent_scored_articles
 from app.analysis.scoring import (
-    aggregate_sentiment, effective_threshold, get_profile, score_signal,
+    aggregate_sentiment, effective_threshold, flip_suppressed, get_profile,
+    score_signal,
 )
 from app.analysis.targets import compute_price_targets
 from app.analysis.watch_scope import alert_config, effective_symbols
@@ -115,15 +116,13 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
     # erzeugt LLM-Varianz um die Schwelle herum HOLD→BUY→HOLD-Pingpong
     # bei unverändertem Kurs. (Nach SIGNAL_REFRESH_HOURS greift der
     # normale Refresh und stellt den ehrlichen Zustand wieder her.)
-    if direction_change and not refresh_due and result.action == "HOLD":
+    if direction_change and not refresh_due:
         threshold = effective_threshold(get_profile(asset_class))
-        exit_level = threshold - settings.signal_hysteresis
-        holds_buy = last.action == "BUY" and result.composite > exit_level
-        holds_sell = last.action == "SELL" and result.composite < -exit_level
-        if holds_buy or holds_sell:
+        if flip_suppressed(last.action, result.action, result.composite,
+                           threshold, settings.signal_hysteresis):
             logger.info("Pipeline %s: %s bleibt bestehen (Hysterese; Composite %.2f, "
                         "Ausstieg erst < %.2f)", symbol, last.action,
-                        result.composite, exit_level)
+                        result.composite, threshold - settings.signal_hysteresis)
             return None
 
     if not (refresh_due or direction_change):

@@ -53,6 +53,19 @@ services:
       redis:
         condition: service_healthy
 
+  db-backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD fehlt}
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    # Täglicher pg_dump, 14 Tage Aufbewahrung
+    entrypoint: ["sh", "-c", "while true; do if pg_dump -h db -U ${POSTGRES_USER:-stx} -d ${POSTGRES_DB:-stx} -F c -f /backups/stx-$$(date +%F).dump; then echo \"Backup OK: stx-$$(date +%F).dump\"; else echo 'Backup FEHLGESCHLAGEN'; fi; find /backups -name 'stx-*.dump' -mtime +14 -delete; sleep 86400; done"]
+
   frontend:
     build: ./frontend
     restart: unless-stopped

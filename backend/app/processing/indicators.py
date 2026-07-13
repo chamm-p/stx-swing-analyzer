@@ -17,7 +17,8 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
     # Wilder-Glättung = EMA mit alpha = 1/period
     avg_gain = gain.ewm(alpha=1 / period, min_periods=period).mean()
     avg_loss = loss.ewm(alpha=1 / period, min_periods=period).mean()
-    rs = avg_gain / avg_loss.replace(0, math.nan)
+    # avg_loss == 0 (nur Gewinne) → rs = inf → RSI = 100; 0/0 (flat) → NaN → 50
+    rs = avg_gain / avg_loss
     out = 100 - (100 / (1 + rs))
     return out.fillna(50.0)
 

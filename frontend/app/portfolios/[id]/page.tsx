@@ -27,6 +27,8 @@ export default function PortfolioDetailPage() {
   const router = useRouter();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [history, setHistory] = useState<{ time: string; value: number }[]>([]);
+  const [benchmark, setBenchmark] = useState<{ time: string; value: number }[]>([]);
+  const [benchmarkLabel, setBenchmarkLabel] = useState("Benchmark");
   const [symbol, setSymbol] = useState("");
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
@@ -38,7 +40,11 @@ export default function PortfolioDetailPage() {
       if (e.status === 404) router.push("/portfolios");
       else setError(e.message);
     });
-    api.get(`/api/portfolios/${id}/history`).then(setHistory).catch(() => {});
+    api.get(`/api/portfolios/${id}/history`).then((d) => {
+      setHistory(d.series || []);
+      setBenchmark(d.benchmark || []);
+      setBenchmarkLabel(d.benchmark_symbol || "Benchmark");
+    }).catch(() => {});
   }, [id, router]);
   useEffect(load, [load]);
 
@@ -103,7 +109,12 @@ export default function PortfolioDetailPage() {
       </div>
 
       <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2">
-        <EquityChart data={history} />
+        <EquityChart data={history} benchmark={benchmark} benchmarkLabel={benchmarkLabel} />
+        {benchmark.length > 0 && (
+          <p className="px-2 pb-1 text-xs text-slate-500">
+            — Portfolio · ┄ {benchmarkLabel} (auf Startwert normiert)
+          </p>
+        )}
       </div>
 
       <form onSubmit={addPosition} className="flex flex-wrap gap-2">

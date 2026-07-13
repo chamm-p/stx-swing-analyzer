@@ -3,7 +3,11 @@
 import { useEffect, useRef } from "react";
 import { createChart, ColorType, Time } from "lightweight-charts";
 
-export default function EquityChart({ data }: { data: { time: string; value: number }[] }) {
+type Point = { time: string; value: number };
+
+export default function EquityChart({ data, benchmark, benchmarkLabel }: {
+  data: Point[]; benchmark?: Point[]; benchmarkLabel?: string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,6 +34,19 @@ export default function EquityChart({ data }: { data: { time: string; value: num
       lineWidth: 2,
     });
     series.setData(data as { time: Time; value: number }[]);
+
+    if (benchmark && benchmark.length > 0) {
+      const bench = chart.addLineSeries({
+        color: "#64748b",
+        lineWidth: 1,
+        lineStyle: 1, // gestrichelt
+        priceLineVisible: false,
+        lastValueVisible: false,
+        title: benchmarkLabel || "Benchmark",
+      });
+      bench.setData(benchmark as { time: Time; value: number }[]);
+    }
+
     chart.timeScale().fitContent();
 
     const onResize = () => {
@@ -41,7 +58,7 @@ export default function EquityChart({ data }: { data: { time: string; value: num
       window.removeEventListener("resize", onResize);
       chart.remove();
     };
-  }, [data]);
+  }, [data, benchmark, benchmarkLabel]);
 
   if (data.length === 0) {
     return <div className="flex h-[260px] items-center justify-center text-slate-500">Noch keine Historie</div>;

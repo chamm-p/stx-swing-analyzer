@@ -163,8 +163,41 @@ async def portfolio_detail(portfolio_id: int, db: AsyncSession = Depends(get_db)
 
 @router.get("/portfolios/{portfolio_id}/history")
 async def portfolio_history(portfolio_id: int, db: AsyncSession = Depends(get_db)):
+    """Equity-Kurve + Benchmark (BENCHMARK_SYMBOL, auf Startwert normiert) —
+    ohne Vergleichslinie ist eine Portfolio-Kurve nicht interpretierbar."""
+    import pandas as pd
+
+    from app.config import get_settings
+    from app.services_redis import get_redis
+
     result = await db.execute(select(Position).where(Position.portfolio_id == portfolio_id))
-    return await equity_curve(db, list(result.scalars().all()))
+    series = await equity_curve(db, list(result.scalars().all()))
+
+    benchmark: list[dict] = []
+    if series:
+        bench_symbol = get_settings().benchmark_symbol
+        # Benchmark-Kurse höchstens 1x täglich nachziehen
+        if await get_redis().set(f"benchsync:{bench_symbol}", "1", nx=True, ex=86400):
+            try:
+                await yahoo.sync_ohlcv(db, bench_symbol)
+            except Exception as e:
+                logger.warning("Benchmark-Sync %s fehlgeschlagen: %s", bench_symbol, e)
+        df = await yahoo.load_ohlcv_df(db, bench_symbol, days=len(series) + 40)
+        if not df.empty:
+            idx = pd.to_datetime([s["time"] for s in series], utc=True)
+            closes = df["close"]
+            closes = closes.reindex(closes.index.union(idx)).ffill().reindex(idx)
+            valid = closes.dropna()
+            if not valid.empty:
+                base_close = float(valid.iloc[0])
+                base_value = series[0]["value"]
+                benchmark = [
+                    {"time": s["time"], "value": round(base_value * float(c) / base_close, 2)}
+                    for s, c in zip(series, closes)
+                    if c == c  # NaN-Filter
+                ]
+    return {"series": series, "benchmark": benchmark,
+            "benchmark_symbol": get_settings().benchmark_symbol}
 
 
 @router.post("/portfolios/{portfolio_id}/positions", status_code=201)

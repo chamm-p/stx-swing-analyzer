@@ -72,6 +72,7 @@ async def init_db() -> None:
             ("signals", "analyst_target", "DOUBLE PRECISION"),
             ("signals", "analyst_count", "INTEGER"),
             ("signals", "eval_target_hit", "BOOLEAN"),
+            ("news_articles", "sentiment_relevance", "DOUBLE PRECISION"),
             ("signals", "eval_price", "DOUBLE PRECISION"),
             ("signals", "eval_return_pct", "DOUBLE PRECISION"),
             ("signals", "eval_hit", "BOOLEAN"),

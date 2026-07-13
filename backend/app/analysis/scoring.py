@@ -75,7 +75,7 @@ def technical_score(ind: dict, profile: ScoringProfile = PROFILES["stock"]) -> t
     if hist is not None:
         base = max(-1.0, min(1.0, (hist / close) * profile.macd_scale))  # normiert auf Kurs
         momentum = 0.0
-        if prev is not None:
+        if prev is not None and hist != prev:
             momentum = 0.3 if hist > prev else -0.3
         components["macd"] = max(-1.0, min(1.0, base + momentum))
 
@@ -86,11 +86,15 @@ def technical_score(ind: dict, profile: ScoringProfile = PROFILES["stock"]) -> t
         components["bollinger"] = max(-1.0, min(1.0, (0.5 - pos) * 2))
 
     # Trend: Kurs relativ zu SMA50/SMA200 (Trendfolge-Komponente).
+    # Exakter Gleichstand ist neutral — nicht bearish.
+    def sign(a: float, b: float) -> float:
+        return 0.5 if a > b else (-0.5 if a < b else 0.0)
+
     sma50, sma200 = ind.get("sma50"), ind.get("sma200")
     if c is not None and sma50 is not None:
-        trend = 0.5 if c > sma50 else -0.5
+        trend = sign(c, sma50)
         if sma200 is not None:
-            trend += 0.5 if sma50 > sma200 else -0.5  # Golden/Death-Cross-Kontext
+            trend += sign(sma50, sma200)  # Golden/Death-Cross-Kontext
         components["trend"] = max(-1.0, min(1.0, trend))
 
     if not components:
@@ -102,17 +106,40 @@ def technical_score(ind: dict, profile: ScoringProfile = PROFILES["stock"]) -> t
     return round(score, 4), {k: round(v, 4) for k, v in components.items()}
 
 
-def aggregate_sentiment(articles: list[dict]) -> float:
-    """Relevanz-gewichteter Sentiment-Mittelwert der jüngsten Artikel."""
+SENTIMENT_HALF_LIFE_DAYS = 5.0
+
+
+def aggregate_sentiment(articles: list[dict], half_life_days: float = SENTIMENT_HALF_LIFE_DAYS) -> float:
+    """Sentiment-Aggregat: LLM-Relevanz × exponentieller Zeit-Abkling.
+
+    Ein 5 Tage alter Artikel zählt halb so viel wie einer von heute —
+    Nachrichtenlage ist im Swing-Horizont schnell verderblich."""
     weighted, total = 0.0, 0.0
     for a in articles:
         s = a.get("sentiment_score")
         if s is None:
             continue
-        w = a.get("relevance") or 0.5
+        relevance = a.get("relevance")
+        relevance = 0.5 if relevance is None else max(0.0, min(1.0, relevance))
+        age_days = max(0.0, float(a.get("age_days") or 0.0))
+        w = relevance * 0.5 ** (age_days / half_life_days)
         weighted += s * w
         total += w
     return round(weighted / total, 4) if total > 0 else 0.0
+
+
+def flip_suppressed(last_action: str | None, new_action: str, composite: float,
+                    threshold: float, hysteresis: float) -> bool:
+    """Hysterese: BUY/SELL kippt nur auf HOLD zurück, wenn der Composite
+    DEUTLICH unter die Schwelle gefallen ist (Einstieg >= Schwelle,
+    Ausstieg < Schwelle - Hysterese). Harte BUY<->SELL-Wechsel: nie
+    unterdrückt."""
+    if last_action not in ("BUY", "SELL") or new_action != "HOLD":
+        return False
+    exit_level = threshold - hysteresis
+    if last_action == "BUY":
+        return composite > exit_level
+    return composite < -exit_level
 
 
 def effective_threshold(profile: ScoringProfile) -> float:

@@ -78,6 +78,7 @@ class NewsArticle(Base):
     # LLM-Sentiment (wird von der Analyse-Pipeline befüllt)
     sentiment_score: Mapped[float | None] = mapped_column(Float)  # -1..1
     sentiment_label: Mapped[str | None] = mapped_column(String(20))
+    sentiment_relevance: Mapped[float | None] = mapped_column(Float)  # 0..1
     sentiment_rationale: Mapped[str | None] = mapped_column(Text)
     analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

@@ -220,11 +220,32 @@ Für Clients ohne Streamable-HTTP-Support via `mcp-remote`:
 | `backend/app/auth/oidc_config.py` | vereinfachte Env-Variante der cura_llm-Config |
 | `backend/app/llm/client.py` | schlanker Neuaufbau nach dem cura_llm-Provider-Muster (OpenAI-kompatibel + Anthropic) |
 
+## Betrieb & Qualität
+
+- **Tests + CI:** pytest-Suite für den deterministischen Kern (Scoring,
+  Profile, Hysterese, Zielzonen, Indikatoren, Sentiment-Aggregation,
+  JSON-Parsing) unter `backend/tests/`; läuft per GitHub Action bei
+  jedem Push (`.github/workflows/ci.yml`), zusammen mit dem
+  Frontend-Build als Typecheck. Lokal:
+  `docker compose run --rm -v ./backend/tests:/srv/tests --entrypoint sh backend -c "pip install pytest && python -m pytest tests"`
+- **Dependencies gepinnt** (`backend/requirements.txt`) — besonders
+  yfinance ändert regelmäßig sein Verhalten; Upgrades bewusst machen.
+- **Ops-Alarme:** Schlägt der Kurs-Sync für ein Symbol oder eine
+  News-Quelle 3 Läufe in Folge fehl, kommt eine Meldung über die
+  konfigurierten Alert-Kanäle (Dedupe: max. 1 Meldung/24h je Störung).
+- **DB-Backup:** `db-backup`-Service macht täglich einen `pg_dump` nach
+  `./backups/` (14 Tage Aufbewahrung). Restore:
+  `docker compose exec -T db pg_restore -U stx -d stx --clean < backups/stx-<datum>.dump`
+- **Sentiment-Aggregation:** LLM-Relevanz je Artikel × exponentieller
+  Zeit-Abkling (Halbwertszeit 5 Tage) — alte News verlieren Gewicht.
+- **Portfolio-Benchmark:** Equity-Kurven zeigen `BENCHMARK_SYMBOL`
+  (Default SPY, auf Startwert normiert) als Vergleichslinie.
+
 ## Roadmap / Phase 2
 
 - Abonnement-Datenquellen (konfigurierbare kostenpflichtige Streams)
 - WebPush als dritter Alert-Kanal (VAPID + Service Worker)
 - Reddit/X-Connectoren (API-Keys erforderlich)
-- Alpha-Vantage-Fallback für Kursdaten (Free-Tier: 25 Requests/Tag)
+- Alternativer Kursdaten-Provider als Yahoo-Fallback
 - Backtesting-Framework
 - Alembic-Migrationen (aktuell `create_all` + idempotente Hypertable-Setups)

@@ -42,6 +42,7 @@ async def analyze_pending_sentiment(db: AsyncSession, llm: LLMClient, symbol: st
             )
             article.sentiment_score = max(-1.0, min(1.0, float(data.get("score", 0.0))))
             article.sentiment_label = str(data.get("label", "neutral"))[:20]
+            article.sentiment_relevance = max(0.0, min(1.0, float(data.get("relevance", 0.5))))
             article.sentiment_rationale = data.get("rationale")
             article.analyzed_at = utcnow()
             db.add(AnalysisResult(symbol=symbol, kind="sentiment", model=llm.model, payload={
@@ -66,12 +67,14 @@ async def recent_scored_articles(db: AsyncSession, symbol: str, limit: int = 15)
         .order_by(NewsArticle.published_at.desc())
         .limit(limit)
     )
+    now = utcnow()
     return [{
         "title": a.title,
         "published": a.published_at.strftime("%Y-%m-%d"),
         "source": a.source_name,
         "sentiment_score": a.sentiment_score,
-        "relevance": 1.0,
+        "relevance": a.sentiment_relevance,
+        "age_days": max(0.0, (now - a.published_at).total_seconds() / 86400),
     } for a in result.scalars().all()]
 
 

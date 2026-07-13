@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.0
 
     # Marktdaten
-    alpha_vantage_api_key: str = ""
+    benchmark_symbol: str = "SPY"  # Vergleichsindex für Portfolio-Kurven
 
     # Scheduler
     fetch_market_interval_min: int = 60
