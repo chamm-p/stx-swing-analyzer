@@ -47,6 +47,7 @@ export default function TopSignalsPage() {
   const [portfolios, setPortfolios] = useState<PortfolioOption[]>([]);
   const [targetPortfolio, setTargetPortfolio] = useState<number | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [rowStatus, setRowStatus] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -83,6 +84,29 @@ export default function TopSignalsPage() {
       setMsg("Scan gestartet — Universum wird analysiert (dauert einige Minuten).");
     } catch (e: any) {
       setMsg(e.message);
+    }
+  }
+
+  async function analyze(symbol: string) {
+    setRowStatus((s) => ({ ...s, [symbol]: "⏳ analysiere…" }));
+    try {
+      // Analyse setzt Watchlist/Portfolio-Scope voraus — bei Bedarf
+      // erst auf die Watchlist nehmen (409 = ist schon drauf, ok).
+      try {
+        await api.post("/api/watchlist", { symbol });
+      } catch (e: any) {
+        if (e.status !== 409) throw e;
+      }
+      const res = await api.post(`/api/signals/run/${symbol}`);
+      const s = res.signal;
+      setRowStatus((st) => ({
+        ...st,
+        [symbol]: res.created && s
+          ? `✅ ${s.action} (${Math.round(s.confidence * 100)}%)${s.target_price ? ` · Ziel ${s.target_price}` : ""}`
+          : "✅ analysiert — unverändert",
+      }));
+    } catch (e: any) {
+      setRowStatus((s) => ({ ...s, [symbol]: `❌ ${e.message}` }));
     }
   }
 
@@ -207,6 +231,14 @@ export default function TopSignalsPage() {
                   <td className="px-3 py-2 text-slate-400">{r.snapshot?.rsi14?.toFixed(0) ?? "—"}</td>
                   <td className="px-3 py-2">{r.close ?? "—"}</td>
                   <td className="px-3 py-2 text-right">
+                    {rowStatus[r.symbol] ? (
+                      <span className="mr-2 text-xs text-amber-400">{rowStatus[r.symbol]}</span>
+                    ) : null}
+                    <button onClick={() => analyze(r.symbol)}
+                      className="mr-2 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-amber-500"
+                      title="Zur Watchlist + sofortige Voll-Analyse (Indikatoren, LLM, Scoring)">
+                      ⚡ Analyse
+                    </button>
                     <button onClick={() => toWatchlist(r.symbol)}
                       className="mr-2 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-sky-500">
                       → Watchlist

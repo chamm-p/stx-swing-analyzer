@@ -164,6 +164,14 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
+  // Ungespeicherte Änderungen? Test/Modell-Fetch nutzen Formularwerte,
+  // die Pipeline aber nur GESPEICHERTE — der Hinweis verhindert, dass
+  // ein erfolgreicher Test ohne Speichern für "eingerichtet" gehalten wird.
+  const dirty =
+    provider !== initial.provider || baseUrl !== initial.base_url ||
+    model !== initial.model || apiKey !== "";
+  const unsavedHint = dirty ? " ⚠️ Noch nicht gespeichert — die Analyse nutzt nur gespeicherte Werte!" : "";
+
   async function fetchModels() {
     setBusy(true);
     setMsg(null);
@@ -172,7 +180,7 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
         provider, base_url: baseUrl, api_key: apiKey || null,
       });
       setModels(res.models);
-      setMsg(`${res.models.length} Modelle gefunden — Verbindung OK.`);
+      setMsg(`${res.models.length} Modelle gefunden — Verbindung OK.${unsavedHint}`);
     } catch (e: any) {
       setMsg(e.message);
       setModels([]);
@@ -202,7 +210,7 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
       const res = await api.post("/api/settings/llm/test", {
         provider, base_url: baseUrl, model, api_key: apiKey || null,
       });
-      setMsg(`✅ ${res.model} antwortet in ${res.latency_ms} ms: „${res.reply}"`);
+      setMsg(`✅ ${res.model} antwortet in ${res.latency_ms} ms: „${res.reply}"${unsavedHint}`);
     } catch (e: any) {
       setMsg(`❌ ${e.message}`);
     } finally {

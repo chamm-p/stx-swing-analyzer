@@ -138,6 +138,13 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
 
 async def run_all(db: AsyncSession) -> int:
     symbols = await effective_symbols(db)
+    # Effektive LLM-Config sichtbar machen — beantwortet im Log sofort die
+    # Frage "warum sehe ich keine LLM-Calls beim Provider?"
+    from app.services_settings import load_settings
+    llm_cfg = await load_settings(db, "llm")
+    logger.info("Analyse-Lauf: %d Symbole | LLM %s @ %s | Modell %s | API-Key %s",
+                len(symbols), llm_cfg["provider"], llm_cfg["base_url"],
+                llm_cfg["model"], "gesetzt" if llm_cfg["api_key"] else "FEHLT")
     count = 0
     for symbol in symbols:
         try:

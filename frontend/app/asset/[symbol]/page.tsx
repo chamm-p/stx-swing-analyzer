@@ -40,6 +40,7 @@ export default function AssetPage() {
   const [showProfile, setShowProfile] = useState(false);
   const [rangeDays, setRangeDays] = useState(365);
   const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -52,11 +53,18 @@ export default function AssetPage() {
 
   async function runNow() {
     setRunning(true);
+    setRunResult(null);
+    setError(null);
     try {
-      await api.post(`/api/signals/run/${symbol}`);
+      const res = await api.post(`/api/signals/run/${symbol}`);
+      if (res.created && res.signal) {
+        setRunResult(`✅ Analyse abgeschlossen — neues Signal: ${res.signal.action} (${Math.round(res.signal.confidence * 100)}%)`);
+      } else {
+        setRunResult("✅ Analyse abgeschlossen — Einschätzung unverändert, kein neues Signal (Dedupe-Fenster).");
+      }
       load();
     } catch (e: any) {
-      setError(e.message);
+      setRunResult(`❌ Analyse fehlgeschlagen: ${e.message}`);
     } finally {
       setRunning(false);
     }
@@ -96,6 +104,7 @@ export default function AssetPage() {
         </button>
       </div>
       {error && <p className="text-sm text-rose-400">{error}</p>}
+      {runResult && <p className="text-sm text-amber-400">{runResult}</p>}
 
       <div className="flex gap-2">
         {[

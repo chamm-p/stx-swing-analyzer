@@ -69,13 +69,25 @@ class LLMClient:
                 if self.cache_ttl > 0:
                     await get_redis().set(cache_key, text, ex=self.cache_ttl)
                 return text
+            except httpx.HTTPStatusError as e:
+                # Fehler-Body mitgeben — Provider (vLLM, OpenAI, …) sagen dort
+                # präzise, was am Request falsch ist (Modellname, Parameter, …)
+                detail = ""
+                try:
+                    detail = f" — {e.response.text[:300]}"
+                except Exception:
+                    pass
+                last_err = LLMError(f"HTTP {e.response.status_code}{detail}")
+                if 400 <= e.response.status_code < 500 and e.response.status_code != 429:
+                    break  # Client-Fehler: Retry ändert nichts
+                await asyncio.sleep(_BACKOFF_BASE ** attempt)
             except (httpx.HTTPError, LLMError) as e:
                 last_err = e
                 wait = _BACKOFF_BASE ** attempt
                 logger.warning("LLM-Call fehlgeschlagen (Versuch %d/%d): %s — retry in %.0fs",
                                attempt + 1, _RETRIES, e, wait)
                 await asyncio.sleep(wait)
-        raise LLMError(f"LLM nicht erreichbar nach {_RETRIES} Versuchen: {last_err}")
+        raise LLMError(f"LLM-Fehler: {last_err}")
 
     async def complete_json(self, system: str, user: str) -> dict:
         """Completion, deren Antwort als JSON-Objekt geparst wird."""
