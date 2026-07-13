@@ -159,32 +159,13 @@ export default function TopSignalsPage() {
         <span className="text-xs text-slate-500">
           Universum-Screener (rein technisch, unabhängig von Watchlist & Portfolio)
         </span>
-        <div className="ml-auto flex items-center gap-2">
-          {portfolios.length > 0 && (
-            <label className="flex items-center gap-1 text-xs text-slate-500"
-              title="Legt fest, in welches Portfolio der →Portfolio-Button einer Zeile kauft">
-              „→ Portfolio" kauft in:
-              <select
-                value={targetPortfolio ?? ""}
-                onChange={(e) => setTargetPortfolio(Number(e.target.value))}
-                className="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-300"
-              >
-                {portfolios.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.kind === "trial" ? "Trial" : p.kind === "auto" ? "Auto" : "Echt"})
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <button onClick={runScan}
-            className="rounded bg-sky-600 px-3 py-1.5 text-sm font-semibold hover:bg-sky-500">
-            Scan starten
-          </button>
-        </div>
+        <button onClick={runScan}
+          className="ml-auto rounded bg-sky-600 px-3 py-1.5 text-sm font-semibold hover:bg-sky-500">
+          Scan starten
+        </button>
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {SEGMENTS.map((s) => (
           <button
             key={s.label}
@@ -198,6 +179,23 @@ export default function TopSignalsPage() {
             {s.label}
           </button>
         ))}
+        {portfolios.length > 0 && (
+          <label className="ml-auto flex items-center gap-1 text-xs text-slate-500"
+            title="Legt fest, in welches Portfolio der →Portfolio-Button einer Zeile kauft">
+            „→ Portfolio" kauft in:
+            <select
+              value={targetPortfolio ?? ""}
+              onChange={(e) => setTargetPortfolio(Number(e.target.value))}
+              className="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-300"
+            >
+              {portfolios.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.kind === "trial" ? "Trial" : p.kind === "auto" ? "Auto" : "Echt"})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       {data?.run_at && (

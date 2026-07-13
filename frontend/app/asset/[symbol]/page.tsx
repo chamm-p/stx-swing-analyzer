@@ -60,6 +60,8 @@ export default function AssetPage() {
   const [rangeDays, setRangeDays] = useState(365);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<string | null>(null);
+  const [portfolios, setPortfolios] = useState<{ id: number; name: string; kind: string }[]>([]);
+  const [targetPortfolio, setTargetPortfolio] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -68,6 +70,10 @@ export default function AssetPage() {
     api.get(`/api/assets/${symbol}/analyses`).then(setAnalyses).catch(() => {});
     api.get(`/api/assets/${symbol}/profile`).then(setProfile).catch(() => {});
     api.get(`/api/assets/${symbol}/events`).then(setEvents).catch(() => {});
+    api.get("/api/portfolios").then((p) => {
+      setPortfolios(p);
+      if (p.length > 0) setTargetPortfolio((cur: number | null) => cur ?? p[0].id);
+    }).catch(() => {});
   }, [symbol, rangeDays]);
   useEffect(load, [load]);
 
@@ -76,23 +82,7 @@ export default function AssetPage() {
     setRunResult(null);
     setError(null);
     try {
-      let res;
-      try {
-        res = await runAnalysis(symbol);
-      } catch (e: any) {
-        // Nicht im Analyse-Scope → anbieten, direkt aufzunehmen (wie ⚡ in der Topliste)
-        if (e.status === 404 && confirm(
-          `${symbol} ist weder auf der Watchlist noch in einem beobachteten Portfolio.\n` +
-          `Zur Watchlist hinzufügen und analysieren?`
-        )) {
-          await api.post("/api/watchlist", { symbol }).catch((we: any) => {
-            if (we.status !== 409) throw we;
-          });
-          res = await runAnalysis(symbol);
-        } else {
-          throw e;
-        }
-      }
+      const res = await runAnalysis(symbol);
       if (res.created && res.signal) {
         setRunResult(`✅ Analyse abgeschlossen — neues Signal: ${res.signal.action} (${Math.round(res.signal.confidence * 100)}%)`);
       } else {
@@ -131,13 +121,58 @@ export default function AssetPage() {
           )}
         </div>
         {latestSignal && <SignalBadge action={latestSignal.action} confidence={latestSignal.confidence} />}
-        <button
-          onClick={runNow}
-          disabled={running}
-          className="ml-auto rounded bg-sky-600 px-3 py-1.5 text-sm font-semibold hover:bg-sky-500 disabled:opacity-50"
-        >
-          {running ? "Analysiere… (LLM)" : "Jetzt analysieren"}
-        </button>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            onClick={async () => {
+              setRunResult(null);
+              try {
+                await api.post("/api/watchlist", { symbol });
+                setRunResult(`✅ ${symbol} zur Watchlist hinzugefügt.`);
+              } catch (e: any) {
+                setRunResult(e.status === 409 ? `${symbol} ist bereits auf der Watchlist.` : `❌ ${e.message}`);
+              }
+            }}
+            className="rounded border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-sky-500"
+          >
+            → Watchlist
+          </button>
+          {portfolios.length > 0 && (
+            <span className="flex items-center gap-1">
+              <select value={targetPortfolio ?? ""} onChange={(e) => setTargetPortfolio(Number(e.target.value))}
+                className="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-300">
+                {portfolios.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <button
+                onClick={async () => {
+                  if (targetPortfolio === null) return;
+                  const qty = window.prompt(`Stückzahl für ${symbol}?`, "10");
+                  if (!qty) return;
+                  setRunResult(null);
+                  try {
+                    const res = await api.post(`/api/portfolios/${targetPortfolio}/positions`, {
+                      symbol, quantity: parseFloat(qty.replace(",", ".")),
+                    });
+                    setRunResult(`✅ ${symbol} gekauft zu ${res.entry_price}.`);
+                  } catch (e: any) {
+                    setRunResult(`❌ ${e.message}`);
+                  }
+                }}
+                className="rounded border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-emerald-500"
+              >
+                Kaufen
+              </button>
+            </span>
+          )}
+          <button
+            onClick={runNow}
+            disabled={running}
+            className="rounded bg-sky-600 px-3 py-1.5 text-sm font-semibold hover:bg-sky-500 disabled:opacity-50"
+          >
+            {running ? "Analysiere… (LLM)" : "Jetzt analysieren"}
+          </button>
+        </div>
       </div>
       {error && <p className="text-sm text-rose-400">{error}</p>}
       {runResult && <p className="text-sm text-amber-400">{runResult}</p>}

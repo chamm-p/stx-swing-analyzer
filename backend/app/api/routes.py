@@ -176,6 +176,11 @@ async def _run_analysis_bg(symbol: str) -> None:
     try:
         async with SessionLocal() as db:
             await yahoo.sync_ohlcv(db, symbol)
+            if await yahoo.latest_close(db, symbol) is None:
+                payload = {"state": "error",
+                           "detail": f"Keine Kursdaten für {symbol} — Symbol korrekt (Yahoo-Notation)?"}
+                await r.set(key, _json.dumps(payload), ex=_ANALYZE_STATUS_TTL)
+                return
             signal = await run_for_symbol(db, symbol)
         payload = {"state": "done", "created": signal is not None,
                    "signal": _signal_dict(signal) if signal else None}
@@ -187,27 +192,27 @@ async def _run_analysis_bg(symbol: str) -> None:
 
 @router.post("/signals/run/{symbol}", status_code=202)
 async def trigger_analysis(symbol: str, db: AsyncSession = Depends(get_db)):
-    """Manuelle Analyse eines Symbols — asynchron.
+    """Manuelle Analyse eines Symbols — asynchron und IMMER on demand.
 
     Mit vielen ungelesenen News dauert die LLM-Analyse Minuten; ein
     synchroner Request liefe in den Proxy-Timeout (der Browser sähe einen
     Internal Server Error, obwohl das Backend sauber fertig rechnet).
     Daher: 202 + Status-Polling über GET .../status.
 
-    Zulässig für die effektive Watchlist: manuelle Einträge UND offene
-    Positionen aus Portfolios mit aktivem „Beobachten"-Schalter."""
+    Bewusst ohne Watchlist-Zwang: Jedes auflösbare Symbol darf ad-hoc
+    analysiert werden (Kosten trägt der eine manuelle Klick). Nur die
+    periodische Pipeline bleibt auf die effektive Watchlist beschränkt."""
     import asyncio
     import json as _json
 
-    from app.analysis.watch_scope import effective_symbols
     from app.services_redis import get_redis
 
     symbol = symbol.upper()
-    if symbol not in await effective_symbols(db):
-        raise HTTPException(
-            status_code=404,
-            detail="Weder auf der Watchlist noch in einem beobachteten Portfolio",
-        )
+    if await db.get(Asset, symbol) is None:
+        try:
+            await yahoo.ensure_asset(db, symbol)
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Symbol {symbol} nicht auflösbar: {e}")
     r = get_redis()
     key = f"analyze:{symbol}"
     existing = await r.get(key)
