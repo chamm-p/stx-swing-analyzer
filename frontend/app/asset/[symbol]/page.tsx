@@ -76,7 +76,23 @@ export default function AssetPage() {
     setRunResult(null);
     setError(null);
     try {
-      const res = await runAnalysis(symbol);
+      let res;
+      try {
+        res = await runAnalysis(symbol);
+      } catch (e: any) {
+        // Nicht im Analyse-Scope → anbieten, direkt aufzunehmen (wie ⚡ in der Topliste)
+        if (e.status === 404 && confirm(
+          `${symbol} ist weder auf der Watchlist noch in einem beobachteten Portfolio.\n` +
+          `Zur Watchlist hinzufügen und analysieren?`
+        )) {
+          await api.post("/api/watchlist", { symbol }).catch((we: any) => {
+            if (we.status !== 409) throw we;
+          });
+          res = await runAnalysis(symbol);
+        } else {
+          throw e;
+        }
+      }
       if (res.created && res.signal) {
         setRunResult(`✅ Analyse abgeschlossen — neues Signal: ${res.signal.action} (${Math.round(res.signal.confidence * 100)}%)`);
       } else {
