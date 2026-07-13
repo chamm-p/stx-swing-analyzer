@@ -18,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/top" className="text-sm text-slate-300 hover:text-white">Top-Signale</Link>
             <Link href="/watchlist" className="text-sm text-slate-300 hover:text-white">Watchlist</Link>
             <Link href="/portfolios" className="text-sm text-slate-300 hover:text-white">Portfolios</Link>
+            <Link href="/review" className="text-sm text-slate-300 hover:text-white">Review</Link>
             <Link href="/sources" className="text-sm text-slate-300 hover:text-white">Datenquellen</Link>
             <span className="ml-auto text-xs text-slate-500">
               Keine Anlageberatung — automatisierte Analyse

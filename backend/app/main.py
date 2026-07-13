@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.portfolios import router as portfolio_router
+from app.api.review import router as review_router
 from app.api.routes import router as api_router
 from app.api.screener import router as screener_router
 from app.auth.routes import router as auth_router
@@ -31,6 +32,7 @@ app = FastAPI(title="stx-swing-analyzer", lifespan=lifespan)
 app.include_router(auth_router, prefix="/api")
 app.include_router(api_router)
 app.include_router(portfolio_router)
+app.include_router(review_router)
 app.include_router(screener_router)
 
 

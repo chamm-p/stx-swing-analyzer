@@ -47,4 +47,19 @@ async def init_db() -> None:
         await conn.execute(text(
             f"SELECT add_retention_policy('news_articles', INTERVAL '{settings.retention_news_days} days', if_not_exists => TRUE)"
         ))
+
+        # Leichtgewichtige Spalten-Migrationen: create_all ergänzt keine
+        # Spalten an bestehenden Tabellen. Idempotent via IF NOT EXISTS.
+        for ddl in (
+            "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS cash DOUBLE PRECISION NOT NULL DEFAULT 0",
+            "ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS config JSONB",
+            "ALTER TABLE positions ADD COLUMN IF NOT EXISTS source VARCHAR(10) NOT NULL DEFAULT 'manual'",
+            "ALTER TABLE positions ADD COLUMN IF NOT EXISTS signal_id UUID",
+            "ALTER TABLE positions ADD COLUMN IF NOT EXISTS horizon_days INTEGER",
+            "ALTER TABLE signals ADD COLUMN IF NOT EXISTS eval_price DOUBLE PRECISION",
+            "ALTER TABLE signals ADD COLUMN IF NOT EXISTS eval_return_pct DOUBLE PRECISION",
+            "ALTER TABLE signals ADD COLUMN IF NOT EXISTS eval_hit BOOLEAN",
+            "ALTER TABLE signals ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ",
+        ):
+            await conn.execute(text(ddl))
     logger.info("DB-Schema initialisiert (Hypertables + Retention-Policies aktiv)")

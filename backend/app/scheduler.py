@@ -9,8 +9,10 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
 
+from app.analysis.auto_trader import run_auto_portfolios
 from app.analysis.pipeline import run_all
 from app.analysis.screener import scan_universe
+from app.analysis.signal_review import evaluate_signals
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Position, WatchlistItem
@@ -58,6 +60,24 @@ async def job_analyze() -> None:
     async with SessionLocal() as db:
         count = await run_all(db)
         logger.info("Analyse-Lauf abgeschlossen: %d neue Signale", count)
+    # Direkt danach: Auto-Portfolios handeln auf frischen Signalen
+    await job_paper_trading()
+
+
+async def job_paper_trading() -> None:
+    """Signal-Review + Auto-Portfolio-Trading (Paper)."""
+    async with SessionLocal() as db:
+        try:
+            await evaluate_signals(db)
+        except Exception as e:
+            logger.exception("Signal-Review fehlgeschlagen: %s", e)
+        try:
+            stats = await run_auto_portfolios(db)
+            if stats["opened"] or stats["closed"]:
+                logger.info("Auto-Trading: %d Käufe, %d Verkäufe",
+                            stats["opened"], stats["closed"])
+        except Exception as e:
+            logger.exception("Auto-Trading fehlgeschlagen: %s", e)
 
 
 def build_scheduler() -> AsyncIOScheduler:
@@ -71,4 +91,8 @@ def build_scheduler() -> AsyncIOScheduler:
                       id="analyze", max_instances=1, coalesce=True)
     scheduler.add_job(job_scan_universe, "interval", minutes=s.scan_interval_min,
                       id="scan_universe", max_instances=1, coalesce=True)
+    # Stündlich zusätzlich: Horizont-Exits + fällige Signal-Auswertungen,
+    # unabhängig vom Analyse-Rhythmus
+    scheduler.add_job(job_paper_trading, "interval", minutes=60,
+                      id="paper_trading", max_instances=1, coalesce=True)
     return scheduler

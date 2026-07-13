@@ -7,12 +7,21 @@ import { api } from "@/lib/api";
 type PortfolioSummary = {
   id: number; name: string; kind: string; open_positions: number;
   invested: number; value: number; pnl_abs: number; pnl_pct: number; realized_pnl: number;
+  cash?: number; total_value?: number; total_pnl_abs?: number; total_pnl_pct?: number;
+  config?: Record<string, any>;
+};
+
+const KIND_BADGE: Record<string, { label: string; cls: string }> = {
+  real: { label: "ECHT", cls: "border-emerald-700 text-emerald-400" },
+  trial: { label: "TRIAL", cls: "border-amber-600 text-amber-400" },
+  auto: { label: "AUTO", cls: "border-sky-600 text-sky-400" },
 };
 
 export default function PortfoliosPage() {
   const [portfolios, setPortfolios] = useState<PortfolioSummary[]>([]);
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<"real" | "trial">("real");
+  const [kind, setKind] = useState<"real" | "trial" | "auto">("real");
+  const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", use_screener: true });
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -24,7 +33,18 @@ export default function PortfoliosPage() {
     e.preventDefault();
     if (!name.trim()) return;
     try {
-      await api.post("/api/portfolios", { name: name.trim(), kind });
+      const body: any = { name: name.trim(), kind };
+      if (kind === "auto") {
+        body.config = {
+          start_capital: parseFloat(cfg.start_capital.replace(",", ".")),
+          max_per_trade: parseFloat(cfg.max_per_trade.replace(",", ".")),
+          max_positions: parseInt(cfg.max_positions),
+          min_confidence: parseFloat(cfg.min_confidence.replace(",", ".")),
+          use_screener: cfg.use_screener,
+          enabled: true,
+        };
+      }
+      await api.post("/api/portfolios", body);
       setName("");
       load();
     } catch (err: any) {
@@ -42,16 +62,35 @@ export default function PortfoliosPage() {
     <div className="space-y-6">
       <h1 className="text-xl font-bold">Portfolios</h1>
 
-      <form onSubmit={create} className="flex flex-wrap gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)}
-          placeholder='Name (z.B. "Depot comdirect", "Swing-Test Q3")'
-          className="w-72 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500" />
-        <select value={kind} onChange={(e) => setKind(e.target.value as "real" | "trial")}
-          className="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
-          <option value="real">Echtes Portfolio</option>
-          <option value="trial">Trial (Strategie-Test)</option>
-        </select>
-        <button className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">Anlegen</button>
+      <form onSubmit={create} className="space-y-2">
+        <div className="flex flex-wrap gap-2">
+          <input value={name} onChange={(e) => setName(e.target.value)}
+            placeholder='Name (z.B. "Depot comdirect", "Swing-Test Q3")'
+            className="w-72 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500" />
+          <select value={kind} onChange={(e) => setKind(e.target.value as any)}
+            className="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
+            <option value="real">Echtes Portfolio</option>
+            <option value="trial">Trial (Strategie-Test)</option>
+            <option value="auto">Auto (System handelt selbst)</option>
+          </select>
+          <button className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">Anlegen</button>
+        </div>
+        {kind === "auto" && (
+          <div className="flex flex-wrap items-center gap-2 rounded border border-sky-900/60 bg-sky-950/30 p-3 text-sm">
+            <CfgInput label="Startkapital" value={cfg.start_capital} onChange={(v) => setCfg({ ...cfg, start_capital: v })} />
+            <CfgInput label="Max. pro Trade" value={cfg.max_per_trade} onChange={(v) => setCfg({ ...cfg, max_per_trade: v })} />
+            <CfgInput label="Max. Positionen" value={cfg.max_positions} onChange={(v) => setCfg({ ...cfg, max_positions: v })} />
+            <CfgInput label="Min. Confidence" value={cfg.min_confidence} onChange={(v) => setCfg({ ...cfg, min_confidence: v })} />
+            <label className="flex items-center gap-1 text-xs text-slate-400">
+              <input type="checkbox" checked={cfg.use_screener}
+                onChange={(e) => setCfg({ ...cfg, use_screener: e.target.checked })} />
+              Screener-Signale handeln
+            </label>
+            <span className="w-full text-xs text-slate-500">
+              Paper-Trading: Das System kauft BUY-Signale und verkauft bei SELL-Signal oder Horizont-Ablauf. Kein echtes Geld.
+            </span>
+          </div>
+        )}
       </form>
       {error && <p className="text-sm text-rose-400">{error}</p>}
 
@@ -62,10 +101,19 @@ export default function PortfoliosPage() {
               <Link href={`/portfolios/${p.id}`} className="text-lg font-bold text-sky-400 hover:underline">
                 {p.name}
               </Link>
-              <span className={`rounded border px-2 py-0.5 text-xs ${p.kind === "trial" ? "border-amber-600 text-amber-400" : "border-emerald-700 text-emerald-400"}`}>
-                {p.kind === "trial" ? "TRIAL" : "ECHT"}
+              <span className={`rounded border px-2 py-0.5 text-xs ${(KIND_BADGE[p.kind] || KIND_BADGE.real).cls}`}>
+                {(KIND_BADGE[p.kind] || KIND_BADGE.real).label}
               </span>
             </div>
+            {p.kind === "auto" && p.total_value !== undefined && (
+              <div className="mt-2 text-sm">
+                <span className="font-semibold">{p.total_value.toLocaleString("de-DE", { maximumFractionDigits: 0 })}</span>
+                <span className="text-xs text-slate-500"> gesamt (davon Cash {p.cash?.toLocaleString("de-DE", { maximumFractionDigits: 0 })})</span>
+                <span className={`ml-2 font-semibold ${(p.total_pnl_abs ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                  {(p.total_pnl_abs ?? 0) >= 0 ? "+" : ""}{p.total_pnl_pct?.toFixed(1)}% seit Start
+                </span>
+              </div>
+            )}
             <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
               <div>
                 <div className="font-semibold">{p.value.toLocaleString("de-DE", { maximumFractionDigits: 0 })}</div>
@@ -97,5 +145,15 @@ export default function PortfoliosPage() {
         </p>
       )}
     </div>
+  );
+}
+
+function CfgInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="flex flex-col text-xs text-slate-400">
+      {label}
+      <input value={value} onChange={(e) => onChange(e.target.value)}
+        className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100 outline-none focus:border-sky-500" />
+    </label>
   );
 }

@@ -18,9 +18,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
 
 
+class AutoConfig(BaseModel):
+    start_capital: float = Field(default=10000.0, gt=0)
+    max_per_trade: float = Field(default=1000.0, gt=0)
+    max_positions: int = Field(default=10, ge=1, le=50)
+    min_confidence: float = Field(default=0.5, ge=0, le=1)
+    use_screener: bool = True
+    enabled: bool = True
+
+
 class PortfolioCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    kind: str = Field(default="real", pattern="^(real|trial)$")
+    kind: str = Field(default="real", pattern="^(real|trial|auto)$")
+    config: AutoConfig | None = None
 
 
 class PositionCreate(BaseModel):
@@ -40,6 +50,7 @@ def _position_dict(p: Position, current: float | None) -> dict:
         "entry_price": p.entry_price, "entry_date": p.entry_date,
         "exit_price": p.exit_price, "exit_date": p.exit_date,
         "notes": p.notes, "is_open": p.exit_date is None,
+        "source": p.source, "horizon_days": p.horizon_days,
         **position_value(p, current),
     }
 
@@ -59,7 +70,7 @@ async def _portfolio_summary(db: AsyncSession, portfolio: Portfolio) -> dict:
                 value += pv["value"]
         elif pv["pnl_abs"] is not None:
             realized += pv["pnl_abs"]
-    return {
+    out = {
         "id": portfolio.id, "name": portfolio.name, "kind": portfolio.kind,
         "created_at": portfolio.created_at,
         "open_positions": open_count,
@@ -69,6 +80,18 @@ async def _portfolio_summary(db: AsyncSession, portfolio: Portfolio) -> dict:
         "pnl_pct": round((value - invested) / invested * 100, 2) if invested else 0.0,
         "realized_pnl": round(realized, 2),
     }
+    if portfolio.kind == "auto":
+        cfg = portfolio.config or {}
+        start = cfg.get("start_capital") or 0.0
+        total = value + portfolio.cash
+        out.update({
+            "cash": round(portfolio.cash, 2),
+            "config": cfg,
+            "total_value": round(total, 2),
+            "total_pnl_abs": round(total - start, 2),
+            "total_pnl_pct": round((total - start) / start * 100, 2) if start else 0.0,
+        })
+    return out
 
 
 @router.get("/portfolios")
@@ -80,6 +103,10 @@ async def list_portfolios(db: AsyncSession = Depends(get_db)):
 @router.post("/portfolios", status_code=201)
 async def create_portfolio(payload: PortfolioCreate, db: AsyncSession = Depends(get_db)):
     portfolio = Portfolio(name=payload.name.strip(), kind=payload.kind)
+    if payload.kind == "auto":
+        cfg = (payload.config or AutoConfig()).model_dump()
+        portfolio.config = cfg
+        portfolio.cash = cfg["start_capital"]
     db.add(portfolio)
     await db.commit()
     return {"id": portfolio.id, "ok": True}

@@ -11,6 +11,7 @@ type PositionRow = {
   exit_price: number | null; exit_date: string | null; is_open: boolean;
   current_price: number | null; value: number | null; invested: number;
   pnl_abs: number | null; pnl_pct: number | null; notes: string | null;
+  source: string; horizon_days: number | null;
 };
 
 type Detail = {
@@ -150,6 +151,11 @@ export default function PortfolioDetailPage() {
                 </td>
                 <td className="px-3 py-2 text-xs text-slate-400">
                   {p.is_open ? "offen" : `verkauft ${p.exit_date ? new Date(p.exit_date).toLocaleDateString("de-DE") : ""}`}
+                  {p.source === "auto" && (
+                    <span className="ml-1 rounded border border-sky-700 px-1 text-[10px] text-sky-400" title={p.notes || ""}>
+                      AUTO{p.horizon_days ? ` ${p.horizon_days}d` : ""}
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-right text-xs">
                   {p.is_open && (

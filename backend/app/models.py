@@ -106,7 +106,12 @@ class Portfolio(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100))
-    kind: Mapped[str] = mapped_column(String(10), default="real")  # real | trial
+    kind: Mapped[str] = mapped_column(String(10), default="real")  # real | trial | auto
+    # Nur kind=auto: Cash-Bestand (Paper) und Trading-Rahmenbedingungen
+    # (start_capital, max_per_trade, max_positions, min_confidence,
+    #  use_screener, enabled)
+    cash: Mapped[float] = mapped_column(Float, default=0.0)
+    config: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -124,6 +129,10 @@ class Position(Base):
     exit_price: Mapped[float | None] = mapped_column(Float)
     exit_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notes: Mapped[str | None] = mapped_column(Text)
+    # Auto-Trading: Herkunft + auslösendes Signal + geplanter Horizont
+    source: Mapped[str] = mapped_column(String(10), default="manual")  # manual | auto
+    signal_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    horizon_days: Mapped[int | None] = mapped_column(Integer)
 
 
 class UniverseSymbol(Base):
@@ -178,3 +187,8 @@ class Signal(Base):
     indicators: Mapped[dict | None] = mapped_column(JSONB)
     price_at_signal: Mapped[float | None] = mapped_column(Float)
     delivered: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Signal-Review: Auswertung nach Ablauf des Horizonts
+    eval_price: Mapped[float | None] = mapped_column(Float)
+    eval_return_pct: Mapped[float | None] = mapped_column(Float)
+    eval_hit: Mapped[bool | None] = mapped_column(Boolean)  # nur BUY/SELL
+    evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

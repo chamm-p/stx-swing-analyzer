@@ -80,6 +80,25 @@ realisiertem P/L, Equity-Kurve aus den Tagesschlusskursen. Symbole aus
 offenen Positionen werden automatisch beim Kurs-Sync und bei den
 symbolbezogenen News-Feeds mitgetrackt.
 
+### Auto-Portfolio & Signal-Review (Selfimprovement, Stufe 1+2)
+
+Ein Portfolio vom Typ **Auto** handelt die System-Signale selbständig —
+als reines Paper-Trading, ohne echtes Geld und ohne Order-Ausführung.
+Rahmenbedingungen pro Portfolio: Startkapital, max. Volumen pro Trade,
+max. offene Positionen, Mindest-Confidence, optional Screener-BUYs.
+Käufe bei BUY-Signalen, Verkäufe bei SELL-Signal oder Horizont-Ablauf;
+3-Tage-Wiedereinstiegs-Cooldown gegen Kauf/Verkauf-Pingpong. Cash und
+Gesamt-P/L seit Start werden mitgeführt.
+
+Das **Signal-Review** (Seite „Review") bewertet unabhängig davon JEDES
+Signal nach Ablauf seines Horizonts gegen die tatsächliche
+Kursentwicklung: Trefferquote und Ø-Rendite je Aktion und Asset-Klasse.
+Beides zusammen ist die Datengrundlage für späteres Parameter-Tuning —
+bewusst OHNE automatische Selbstoptimierung: Parameter-Änderungen
+gehören in ein Backtesting mit Walk-Forward-Validierung
+(Champion/Challenger, Phase 2), nicht in eine freilaufende
+Feedback-Schleife (Überfitting-Gefahr bei kleiner Stichprobe).
+
 ### News-Quellen
 
 Default-Feeds (per URL idempotent geseedet, in der UI verwaltbar):
