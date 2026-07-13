@@ -50,8 +50,13 @@ async def get_watchlist(db: AsyncSession = Depends(get_db)):
         last_news = await db.scalar(
             select(func.max(NewsArticle.published_at)).where(NewsArticle.symbols.any(symbol))
         )
+        last_analysis = await db.scalar(
+            select(func.max(AnalysisResult.ts)).where(
+                AnalysisResult.symbol == symbol, AnalysisResult.kind == "asset_review")
+        )
         return {
             "symbol": symbol,
+            "last_analysis_at": last_analysis,
             "name": asset.name if asset else None,
             "asset_type": asset.asset_type if asset else "stock",
             "currency": asset.currency if asset else None,
@@ -511,8 +516,13 @@ async def symbol_search(q: str):
 async def dashboard(db: AsyncSession = Depends(get_db)):
     from app.analysis.watch_scope import effective_symbols
 
-    signals = await db.execute(select(Signal).order_by(desc(Signal.ts)).limit(20))
-    watch_count = len(await effective_symbols(db))
+    # Nur explizit beobachtete Werte im Dashboard — Ad-hoc-Analysen
+    # (immer-on-demand) sollen die Übersicht nicht fluten
+    scope = await effective_symbols(db)
+    signals = await db.execute(
+        select(Signal).where(Signal.symbol.in_(scope)).order_by(desc(Signal.ts)).limit(20)
+    )
+    watch_count = len(scope)
     news_24h = await db.scalar(
         select(func.count()).select_from(NewsArticle)
         .where(NewsArticle.published_at >= datetime.now(timezone.utc) - timedelta(hours=24))

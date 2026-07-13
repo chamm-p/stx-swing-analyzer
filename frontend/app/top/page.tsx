@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, runAnalysis } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
+import AnalysisLamp from "@/components/AnalysisLamp";
 
 type ScreenerRow = {
   symbol: string;
@@ -13,6 +14,7 @@ type ScreenerRow = {
   technical_score: number;
   close: number | null;
   snapshot: Record<string, any> | null;
+  last_analysis_at: string | null;
 };
 
 type TopResponse = { run_at: string | null; running: boolean; results: ScreenerRow[] };
@@ -102,13 +104,8 @@ export default function TopSignalsPage() {
   async function analyze(symbol: string) {
     setRowStatus((s) => ({ ...s, [symbol]: "⏳ analysiere…" }));
     try {
-      // Analyse setzt Watchlist/Portfolio-Scope voraus — bei Bedarf
-      // erst auf die Watchlist nehmen (409 = ist schon drauf, ok).
-      try {
-        await api.post("/api/watchlist", { symbol });
-      } catch (e: any) {
-        if (e.status !== 409) throw e;
-      }
+      // Ad-hoc-Analyse OHNE Watchlist-Aufnahme — in Dashboard/Watchlist
+      // kommt nur, was explizit aufgenommen wird.
       const res = await runAnalysis(symbol);
       const s = res.signal;
       setRowStatus((st) => ({
@@ -232,7 +229,8 @@ export default function TopSignalsPage() {
                 <tr key={r.symbol} className="border-t border-slate-800 hover:bg-slate-900/50">
                   <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                   <td className="px-3 py-2">
-                    <Link href={`/asset/${r.symbol}`} className="font-semibold text-sky-400 hover:underline">
+                    <AnalysisLamp ts={r.last_analysis_at} />
+                    <Link href={`/asset/${r.symbol}`} className="ml-2 font-semibold text-sky-400 hover:underline">
                       {r.symbol}
                     </Link>
                     <span className="ml-2 text-xs text-slate-500">{r.name}</span>

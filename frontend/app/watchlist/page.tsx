@@ -5,8 +5,13 @@ import Link from "next/link";
 import { api, runAnalysis, WatchlistEntry } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
 import SymbolSearch from "@/components/SymbolSearch";
+import AnalysisLamp from "@/components/AnalysisLamp";
 
-type Entry = WatchlistEntry & { last_close: number | null; last_news_at: string | null };
+type Entry = WatchlistEntry & {
+  last_close: number | null;
+  last_news_at: string | null;
+  last_analysis_at: string | null;
+};
 
 export default function WatchlistPage() {
   const [items, setItems] = useState<Entry[]>([]);
@@ -113,7 +118,8 @@ export default function WatchlistPage() {
                 return (
                   <tr key={item.symbol} className="border-t border-slate-800 hover:bg-slate-900/50">
                     <td className="px-3 py-2">
-                      <Link href={`/asset/${item.symbol}`} className="font-semibold text-sky-400 hover:underline">
+                      <AnalysisLamp ts={item.last_analysis_at} />
+                      <Link href={`/asset/${item.symbol}`} className="ml-2 font-semibold text-sky-400 hover:underline">
                         {item.symbol}
                       </Link>
                       <span className="ml-2 text-xs text-slate-500">

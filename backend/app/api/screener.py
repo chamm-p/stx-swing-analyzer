@@ -37,6 +37,19 @@ async def top_signals(limit: int = 25, segment: str | None = None,
             q = q.where(UniverseSymbol.segment == segment.upper())
         result = await db.execute(q)
         rows = result.all()
+
+    # Analyse-Frische je Symbol (letztes LLM-Review) für die Ampel
+    analysis_map: dict = {}
+    if rows:
+        from app.models import AnalysisResult
+        res = await db.execute(
+            select(AnalysisResult.symbol, func.max(AnalysisResult.ts))
+            .where(AnalysisResult.kind == "asset_review",
+                   AnalysisResult.symbol.in_([r.symbol for r, _, _ in rows]))
+            .group_by(AnalysisResult.symbol)
+        )
+        analysis_map = {sym: ts for sym, ts in res.all()}
+
     return {
         "run_at": last_run,
         "running": await screener.is_running(),
@@ -44,6 +57,7 @@ async def top_signals(limit: int = 25, segment: str | None = None,
             "symbol": r.symbol, "name": name, "segment": segment,
             "action": r.action, "technical_score": r.technical_score,
             "close": r.close, "snapshot": r.snapshot,
+            "last_analysis_at": analysis_map.get(r.symbol),
         } for r, name, segment in rows],
     }
 
