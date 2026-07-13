@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
@@ -26,9 +26,24 @@ const SEGMENTS = [
   { key: "CRYPTO", label: "Top Cryptos" },
 ] as const;
 
+type SortKey = "strength" | "symbol" | "segment" | "action" | "score" | "rsi" | "close";
+
+function sortValue(r: ScreenerRow, key: SortKey): string | number {
+  switch (key) {
+    case "strength": return Math.abs(r.technical_score);
+    case "symbol": return r.symbol;
+    case "segment": return r.segment ?? "";
+    case "action": return { BUY: 3, SELL: 2, HOLD: 1 }[r.action] ?? 0;
+    case "score": return r.technical_score;
+    case "rsi": return r.snapshot?.rsi14 ?? -Infinity;
+    case "close": return r.close ?? -Infinity;
+  }
+}
+
 export default function TopSignalsPage() {
   const [data, setData] = useState<TopResponse | null>(null);
   const [segment, setSegment] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "strength", dir: -1 });
   const [portfolios, setPortfolios] = useState<PortfolioOption[]>([]);
   const [targetPortfolio, setTargetPortfolio] = useState<number | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -43,6 +58,23 @@ export default function TopSignalsPage() {
     }).catch(() => {});
   }, [segment]);
   useEffect(load, [load]);
+
+  const sorted = useMemo(() => {
+    const rows = [...(data?.results ?? [])];
+    rows.sort((a, b) => {
+      const va = sortValue(a, sort.key);
+      const vb = sortValue(b, sort.key);
+      if (typeof va === "string") return sort.dir * va.localeCompare(vb as string);
+      return sort.dir * ((va as number) - (vb as number));
+    });
+    return rows;
+  }, [data, sort]);
+
+  function toggleSort(key: SortKey) {
+    setSort((s) => s.key === key
+      ? { key, dir: -s.dir as 1 | -1 }
+      : { key, dir: key === "symbol" || key === "segment" ? 1 : -1 });
+  }
 
   async function runScan() {
     setMsg(null);
@@ -100,7 +132,7 @@ export default function TopSignalsPage() {
             >
               {portfolios.map((p) => (
                 <option key={p.id} value={p.id}>
-                  Ziel: {p.name} ({p.kind === "trial" ? "Trial" : "Echt"})
+                  Ziel: {p.name} ({p.kind === "trial" ? "Trial" : p.kind === "auto" ? "Auto" : "Echt"})
                 </option>
               ))}
             </select>
@@ -147,18 +179,18 @@ export default function TopSignalsPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-900 text-left text-slate-400">
               <tr>
-                <th className="px-3 py-2">#</th>
-                <th className="px-3 py-2">Symbol</th>
-                <th className="px-3 py-2">Segment</th>
-                <th className="px-3 py-2">Signal</th>
-                <th className="px-3 py-2">Tech-Score</th>
-                <th className="px-3 py-2">RSI</th>
-                <th className="px-3 py-2">Kurs</th>
+                <SortHeader label="#" k="strength" sort={sort} onToggle={toggleSort} title="Signalstärke (|Score|)" />
+                <SortHeader label="Symbol" k="symbol" sort={sort} onToggle={toggleSort} />
+                <SortHeader label="Segment" k="segment" sort={sort} onToggle={toggleSort} />
+                <SortHeader label="Signal" k="action" sort={sort} onToggle={toggleSort} />
+                <SortHeader label="Tech-Score" k="score" sort={sort} onToggle={toggleSort} title="Signiert: bullish ↔ bearish" />
+                <SortHeader label="RSI" k="rsi" sort={sort} onToggle={toggleSort} />
+                <SortHeader label="Kurs" k="close" sort={sort} onToggle={toggleSort} />
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
-              {data.results.map((r, i) => (
+              {sorted.map((r, i) => (
                 <tr key={r.symbol} className="border-t border-slate-800 hover:bg-slate-900/50">
                   <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                   <td className="px-3 py-2">
@@ -191,5 +223,23 @@ export default function TopSignalsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function SortHeader({ label, k, sort, onToggle, title }: {
+  label: string; k: SortKey;
+  sort: { key: SortKey; dir: 1 | -1 };
+  onToggle: (k: SortKey) => void;
+  title?: string;
+}) {
+  const active = sort.key === k;
+  return (
+    <th className="px-3 py-2">
+      <button onClick={() => onToggle(k)} title={title}
+        className={`flex items-center gap-1 font-semibold hover:text-white ${active ? "text-sky-400" : ""}`}>
+        {label}
+        <span className="text-[10px]">{active ? (sort.dir === -1 ? "▼" : "▲") : "↕"}</span>
+      </button>
+    </th>
   );
 }
