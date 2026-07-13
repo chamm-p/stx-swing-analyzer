@@ -78,6 +78,16 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
                 )
         except Exception as e:
             logger.warning("Katalysatoren für %s nicht abrufbar: %s", symbol, e)
+        # Manuell gepflegte Termine (Patentablauf, HV, …) — gleiche Behandlung
+        from app.models import CustomEvent
+        result_ce = await db.execute(
+            select(CustomEvent).where(CustomEvent.symbol == symbol,
+                                      CustomEvent.date >= utcnow().date().isoformat())
+            .order_by(CustomEvent.date)
+        )
+        for e in result_ce.scalars().all():
+            parts.append(f"{e.title} am {e.date} (Wichtigkeit {e.importance}/10)")
+            catalysts.append({"title": e.title, "date": e.date, "importance": e.importance})
         if parts:
             events_text = "; ".join(parts)
 

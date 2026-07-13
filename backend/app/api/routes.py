@@ -15,7 +15,8 @@ from app.analysis.pipeline import run_for_symbol
 from app.auth.deps import require_user
 from app.database import get_db
 from app.models import (
-    AnalysisResult, Asset, DataSource, NewsArticle, Signal, WatchlistItem,
+    AnalysisResult, Asset, CustomEvent, DataSource, NewsArticle, Signal,
+    WatchlistItem,
 )
 from app.processing.indicators import compute_indicators
 from app.sources import yahoo
@@ -314,14 +315,14 @@ async def asset_profile(symbol: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/assets/{symbol}/events")
-async def asset_events(symbol: str):
-    """Anstehende Termine: Quartalszahlen/Dividende (Yahoo) + Biotech-
-    Katalysatoren (CatalystAlert). Beides Redis-gecacht (12h)."""
+async def asset_events(symbol: str, db: AsyncSession = Depends(get_db)):
+    """Anstehende Termine: Quartalszahlen/Dividende (Yahoo), Biotech-
+    Katalysatoren (CatalystAlert, beide Redis-gecacht) + eigene Termine."""
     from app.sources.catalyst import fetch_catalysts
 
     symbol = symbol.upper()
     out = {"earnings_dates": [], "ex_dividend_date": None, "dividend_date": None,
-           "catalysts": []}
+           "catalysts": [], "custom": []}
     try:
         out.update(await yahoo.fetch_events(symbol))
     except Exception as e:
@@ -330,7 +331,40 @@ async def asset_events(symbol: str):
         out["catalysts"] = await fetch_catalysts(symbol)
     except Exception as e:
         logger.warning("Katalysatoren für %s nicht abrufbar: %s", symbol, e)
+    result = await db.execute(
+        select(CustomEvent).where(CustomEvent.symbol == symbol).order_by(CustomEvent.date)
+    )
+    out["custom"] = [{
+        "id": str(e.id), "date": e.date, "title": e.title,
+        "importance": e.importance, "url": e.url,
+    } for e in result.scalars().all()]
     return out
+
+
+class CustomEventCreate(BaseModel):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    title: str = Field(min_length=1, max_length=200)
+    importance: int = Field(default=7, ge=1, le=10)
+    url: str | None = None
+
+
+@router.post("/assets/{symbol}/events", status_code=201)
+async def add_custom_event(symbol: str, payload: CustomEventCreate,
+                           db: AsyncSession = Depends(get_db)):
+    event = CustomEvent(symbol=symbol.upper(), **payload.model_dump())
+    db.add(event)
+    await db.commit()
+    return {"id": str(event.id), "ok": True}
+
+
+@router.delete("/events/{event_id}")
+async def delete_custom_event(event_id: str, db: AsyncSession = Depends(get_db)):
+    import uuid as _uuid
+    event = await db.get(CustomEvent, _uuid.UUID(event_id))
+    if event:
+        await db.delete(event)
+        await db.commit()
+    return {"ok": True}
 
 
 @router.get("/assets/{symbol}/news")

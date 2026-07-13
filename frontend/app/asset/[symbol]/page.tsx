@@ -27,11 +27,16 @@ type Catalyst = {
   indication: string | null; source_url: string | null;
 };
 
+type CustomEvent = {
+  id: string; date: string; title: string; importance: number; url: string | null;
+};
+
 type Events = {
   earnings_dates: string[];
   ex_dividend_date: string | null;
   dividend_date: string | null;
   catalysts: Catalyst[];
+  custom: CustomEvent[];
 };
 
 type Profile = {
@@ -165,7 +170,8 @@ export default function AssetPage() {
         </div>
       )}
 
-      <EventsBar events={events} />
+      <EventsBar events={events} symbol={symbol}
+        onChanged={() => api.get(`/api/assets/${symbol}/events`).then(setEvents).catch(() => {})} />
 
       {profile && (
         <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
@@ -312,16 +318,37 @@ function ProfileStat({ label, value }: { label: string; value: React.ReactNode }
   );
 }
 
-function EventsBar({ events }: { events: Events | null }) {
+function EventsBar({ events, symbol, onChanged }: {
+  events: Events | null; symbol: string; onChanged: () => void;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ date: "", title: "", importance: "7" });
+
   if (!events) return null;
   const today = new Date().toISOString().slice(0, 10);
   const nextEarnings = (events.earnings_dates || []).filter((d) => d >= today)[0];
   const exDiv = events.ex_dividend_date && events.ex_dividend_date >= today ? events.ex_dividend_date : null;
   const catalysts = (events.catalysts || []).filter((c) => c.date >= today).slice(0, 3);
-  if (!nextEarnings && !exDiv && catalysts.length === 0) return null;
+  const custom = (events.custom || []).filter((c) => c.date >= today);
 
   const daysTo = (d: string) =>
     Math.round((new Date(d).getTime() - new Date(today).getTime()) / 86400000);
+
+  async function addEvent(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.date || !form.title.trim()) return;
+    await api.post(`/api/assets/${symbol}/events`, {
+      date: form.date, title: form.title.trim(), importance: parseInt(form.importance) || 7,
+    });
+    setForm({ date: "", title: "", importance: "7" });
+    setShowForm(false);
+    onChanged();
+  }
+
+  async function removeEvent(id: string) {
+    await api.del(`/api/events/${id}`);
+    onChanged();
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-sm">
@@ -350,6 +377,37 @@ function EventsBar({ events }: { events: Events | null }) {
           )}
         </span>
       ))}
+      {custom.map((c) => (
+        <span key={c.id} className="text-slate-300">
+          📌 {c.title}: <span className="font-semibold">{new Date(c.date).toLocaleDateString("de-DE")}</span>
+          <span className="ml-1 text-xs text-amber-400">({c.importance}/10)</span>
+          <button onClick={() => removeEvent(c.id)} title="Termin löschen"
+            className="ml-1 text-xs text-rose-400 hover:underline">✕</button>
+        </span>
+      ))}
+      <button onClick={() => setShowForm(!showForm)} title="Eigenen Termin anlegen (Patentablauf, HV, …)"
+        className="rounded border border-slate-700 px-2 py-0.5 text-xs text-slate-400 hover:border-amber-500">
+        {showForm ? "abbrechen" : "+ Termin"}
+      </button>
+      {showForm && (
+        <form onSubmit={addEvent} className="flex w-full flex-wrap items-center gap-2 pt-1">
+          <input type="date" value={form.date} min={today}
+            onChange={(e) => setForm({ ...form, date: e.target.value })}
+            className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs" />
+          <input value={form.title} placeholder="Titel (z.B. Patentablauf XYZ, Hauptversammlung)"
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            className="w-72 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs" />
+          <label className="flex items-center gap-1 text-xs text-slate-500">
+            Wichtigkeit
+            <input value={form.importance} onChange={(e) => setForm({ ...form, importance: e.target.value })}
+              className="w-10 rounded border border-slate-700 bg-slate-900 px-1 py-1 text-xs" />
+            /10
+          </label>
+          <button className="rounded bg-sky-600 px-3 py-1 text-xs font-semibold hover:bg-sky-500">
+            Speichern
+          </button>
+        </form>
+      )}
     </div>
   );
 }

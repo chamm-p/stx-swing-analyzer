@@ -174,6 +174,20 @@ class ScreenerResult(Base):
     snapshot: Mapped[dict | None] = mapped_column(JSONB)
 
 
+class CustomEvent(Base):
+    """Manuell gepflegte Termine (Patentablauf, HV, Kapitalmarkttag, …) —
+    fließen wie Earnings/Katalysatoren in LLM-Kontext und Signal-Warnungen."""
+    __tablename__ = "custom_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol: Mapped[str] = mapped_column(String(20), index=True)
+    date: Mapped[str] = mapped_column(String(10))  # ISO YYYY-MM-DD
+    title: Mapped[str] = mapped_column(String(200))
+    importance: Mapped[int] = mapped_column(Integer, default=7)  # 1..10
+    url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class AnalysisResult(Base):
     __tablename__ = "analysis_results"
 
