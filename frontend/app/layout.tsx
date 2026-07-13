@@ -25,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/watchlist" className="text-sm text-slate-300 hover:text-white">Watchlist</Link>
             <Link href="/portfolios" className="text-sm text-slate-300 hover:text-white">Portfolios</Link>
             <Link href="/review" className="text-sm text-slate-300 hover:text-white">Review</Link>
+            <Link href="/backtest" className="text-sm text-slate-300 hover:text-white">Backtest</Link>
             <Link href="/settings" className="text-sm text-slate-300 hover:text-white">⚙️ Einstellungen</Link>
             <span className="ml-auto hidden text-xs text-slate-500 lg:block">
               Keine Anlageberatung

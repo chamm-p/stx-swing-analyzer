@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.api.backtest import router as backtest_router
 from app.api.portfolios import router as portfolio_router
 from app.api.review import router as review_router
 from app.api.routes import router as api_router
@@ -78,6 +79,7 @@ app.mount("/api/mcp", _mcp_app)
 # Auth unter /api/auth, damit der Next.js-Proxy (/api/*) alles abdeckt.
 app.include_router(auth_router, prefix="/api")
 app.include_router(api_router)
+app.include_router(backtest_router)
 app.include_router(portfolio_router)
 app.include_router(review_router)
 app.include_router(screener_router)

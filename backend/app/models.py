@@ -209,6 +209,25 @@ class CustomEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class BacktestRun(Base):
+    """Persistierter Backtest-Lauf — Parameter, Kennzahlen, Kurven."""
+    __tablename__ = "backtest_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    status: Mapped[str] = mapped_column(String(10), default="running")  # running | done | error
+    label: Mapped[str | None] = mapped_column(String(120))
+    segment: Mapped[str | None] = mapped_column(String(20))  # US | DAX | CRYPTO | None=alle
+    days: Mapped[int] = mapped_column(Integer, default=730)
+    params: Mapped[dict] = mapped_column(JSONB, default=dict)
+    error: Mapped[str | None] = mapped_column(Text)
+    metrics: Mapped[dict | None] = mapped_column(JSONB)
+    equity: Mapped[list | None] = mapped_column(JSONB)     # [{time, value}]
+    benchmark: Mapped[list | None] = mapped_column(JSONB)  # [{time, value}]
+    trades: Mapped[list | None] = mapped_column(JSONB)
+    warnings: Mapped[list | None] = mapped_column(JSONB)
+
+
 class AnalysisResult(Base):
     __tablename__ = "analysis_results"
 

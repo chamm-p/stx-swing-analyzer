@@ -77,14 +77,19 @@ async def sync_ohlcv(db: AsyncSession, symbol: str, initial_days: int | None = N
     if df is None or df.empty:
         logger.info("Keine neuen Kursdaten für %s", symbol)
         return 0
+    count = await _store_history(db, symbol, df)
+    logger.info("OHLCV-Sync %s: %d Zeilen", symbol, count)
+    return count
 
+
+async def _store_history(db: AsyncSession, symbol: str, df: pd.DataFrame) -> int:
+    """yfinance-DataFrame upserten (Bar-Datum als Mitternacht UTC)."""
     rows = []
     for ts, row in df.iterrows():
         if pd.isna(row.get("Close")):
             continue
-        # Bar-Datum normalisieren: yfinance liefert Mitternacht in Börsen-
-        # Zeitzone; naive UTC-Konvertierung würde EU-Bars auf den Vortag
-        # schieben. Kalenderdatum der Kerze als Mitternacht UTC speichern.
+        # yfinance liefert Mitternacht in Börsen-Zeitzone; naive UTC-
+        # Konvertierung würde EU-Bars auf den Vortag schieben.
         ts_utc = datetime(ts.year, ts.month, ts.day, tzinfo=timezone.utc)
         rows.append({
             "symbol": symbol,
@@ -98,7 +103,6 @@ async def sync_ohlcv(db: AsyncSession, symbol: str, initial_days: int | None = N
         })
     if not rows:
         return 0
-
     stmt = pg_insert(Ohlcv).values(rows)
     stmt = stmt.on_conflict_do_update(
         index_elements=["symbol", "ts"],
@@ -106,8 +110,28 @@ async def sync_ohlcv(db: AsyncSession, symbol: str, initial_days: int | None = N
     )
     await db.execute(stmt)
     await db.commit()
-    logger.info("OHLCV-Sync %s: %d Zeilen", symbol, len(rows))
     return len(rows)
+
+
+async def backfill_ohlcv(db: AsyncSession, symbol: str, days: int) -> int:
+    """Historie rückwärts auffüllen (für Backtests über lange Zeiträume).
+
+    Der normale Sync holt nur vorwärts ab der letzten Kerze — ältere
+    Historie muss einmalig komplett gezogen werden. No-op, wenn die
+    Daten bereits weit genug zurückreichen."""
+    earliest = await db.scalar(select(func.min(Ohlcv.ts)).where(Ohlcv.symbol == symbol))
+    target_start = datetime.now(timezone.utc) - timedelta(days=days)
+    if earliest is not None and earliest <= target_start + timedelta(days=21):
+        return 0
+    df = await with_retry(
+        lambda: asyncio.to_thread(_fetch_history_sync, symbol, target_start, days),
+        label=f"backfill:{symbol}",
+    )
+    if df is None or df.empty:
+        return 0
+    count = await _store_history(db, symbol, df)
+    logger.info("Backfill %s: %d Zeilen", symbol, count)
+    return count
 
 
 async def load_ohlcv_df(db: AsyncSession, symbol: str, days: int = 400) -> pd.DataFrame:
