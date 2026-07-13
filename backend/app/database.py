@@ -41,12 +41,17 @@ async def init_db() -> None:
         await conn.execute(text(
             "SELECT create_hypertable('news_articles', 'published_at', if_not_exists => TRUE, migrate_data => TRUE)"
         ))
-        await conn.execute(text(
-            f"SELECT add_retention_policy('ohlcv', INTERVAL '{settings.retention_ohlcv_days} days', if_not_exists => TRUE)"
-        ))
-        await conn.execute(text(
-            f"SELECT add_retention_policy('news_articles', INTERVAL '{settings.retention_news_days} days', if_not_exists => TRUE)"
-        ))
+        # Retention-Policies: remove+add statt if_not_exists, damit
+        # Änderungen an RETENTION_* in der .env tatsächlich greifen
+        # (add_retention_policy aktualisiert bestehende Policies nicht).
+        for table, days in (("ohlcv", settings.retention_ohlcv_days),
+                            ("news_articles", settings.retention_news_days)):
+            await conn.execute(text(
+                f"SELECT remove_retention_policy('{table}', if_exists => TRUE)"
+            ))
+            await conn.execute(text(
+                f"SELECT add_retention_policy('{table}', INTERVAL '{days} days', if_not_exists => TRUE)"
+            ))
 
         # Leichtgewichtige Spalten-Migrationen: create_all ergänzt keine
         # Spalten an bestehenden Tabellen. Erst prüfen, dann ALTER — ein

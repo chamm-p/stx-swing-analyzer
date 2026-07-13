@@ -181,8 +181,12 @@ async def trigger_analysis(symbol: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/assets/{symbol}/chart")
 async def asset_chart(symbol: str, days: int = 365, db: AsyncSession = Depends(get_db)):
+    from app.config import get_settings
+
     symbol = symbol.upper()
-    df = await yahoo.load_ohlcv_df(db, symbol, days=min(days, 730))
+    # Deckel = Retention-Fenster: mehr Daten kann es nicht geben, und wer
+    # die Retention erhöht, bekommt über die Zeit automatisch längere Charts.
+    df = await yahoo.load_ohlcv_df(db, symbol, days=min(days, get_settings().retention_ohlcv_days))
     if df.empty:
         return {"candles": [], "indicators": {}, "signals": []}
 

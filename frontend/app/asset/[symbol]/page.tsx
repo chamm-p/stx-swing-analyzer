@@ -38,15 +38,16 @@ export default function AssetPage() {
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [rangeDays, setRangeDays] = useState(365);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    api.get(`/api/assets/${symbol}/chart`).then(setChart).catch((e) => setError(e.message));
+    api.get(`/api/assets/${symbol}/chart?days=${rangeDays}`).then(setChart).catch((e) => setError(e.message));
     api.get(`/api/assets/${symbol}/news`).then(setNews).catch(() => {});
     api.get(`/api/assets/${symbol}/analyses`).then(setAnalyses).catch(() => {});
     api.get(`/api/assets/${symbol}/profile`).then(setProfile).catch(() => {});
-  }, [symbol]);
+  }, [symbol, rangeDays]);
   useEffect(load, [load]);
 
   async function runNow() {
@@ -95,6 +96,24 @@ export default function AssetPage() {
         </button>
       </div>
       {error && <p className="text-sm text-rose-400">{error}</p>}
+
+      <div className="flex gap-2">
+        {[
+          { label: "6M", days: 180 },
+          { label: "1J", days: 365 },
+          { label: "2J", days: 730 },
+          { label: "Max", days: 36500 },
+        ].map((r) => (
+          <button key={r.label} onClick={() => setRangeDays(r.days)}
+            className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+              rangeDays === r.days
+                ? "border-sky-500 bg-sky-600/20 text-sky-300"
+                : "border-slate-700 text-slate-400 hover:border-slate-500"
+            }`}>
+            {r.label}
+          </button>
+        ))}
+      </div>
 
       <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2">
         {chart ? (

@@ -19,7 +19,10 @@ from app.sources.base import with_retry
 
 logger = logging.getLogger(__name__)
 
-INITIAL_HISTORY_DAYS = 730  # 2 Jahre — genug für SMA200 + Kontext
+# Initial-Historie für Watchlist-/Portfolio-Assets folgt dem
+# Retention-Fenster — wer RETENTION_OHLCV_DAYS erhöht, bekommt für neue
+# Assets sofort die volle Historie (Bestandsdaten wachsen täglich mit).
+INITIAL_HISTORY_DAYS = 730  # Fallback
 
 
 def _fetch_history_sync(symbol: str, start: datetime | None, initial_days: int) -> pd.DataFrame:
@@ -56,8 +59,11 @@ async def fetch_asset_info(symbol: str) -> dict:
     }
 
 
-async def sync_ohlcv(db: AsyncSession, symbol: str, initial_days: int = INITIAL_HISTORY_DAYS) -> int:
+async def sync_ohlcv(db: AsyncSession, symbol: str, initial_days: int | None = None) -> int:
     """Holt fehlende Tageskerzen und upsertet sie. Liefert Anzahl Zeilen."""
+    if initial_days is None:
+        from app.config import get_settings
+        initial_days = get_settings().retention_ohlcv_days
     last_ts = await db.scalar(select(func.max(Ohlcv.ts)).where(Ohlcv.symbol == symbol))
     start = None
     if last_ts is not None:
