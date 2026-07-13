@@ -146,12 +146,25 @@ export default function PortfoliosPage() {
                 <div className="text-xs text-slate-500">Positionen</div>
               </div>
             </div>
-            {(p.platform_name || p.fees_total > 0) && (
-              <div className="mt-2 text-xs text-slate-500">
-                {p.platform_name && <>Gebühren: {p.platform_name}</>}
-                {p.fees_total > 0 && <> · bisher {p.fees_total.toLocaleString("de-DE")} gezahlt</>}
-              </div>
-            )}
+            <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+              <select
+                value={p.platform_id ?? ""}
+                onChange={async (e) => {
+                  await api.patch(`/api/portfolios/${p.id}`, {
+                    platform_id: e.target.value === "" ? -1 : Number(e.target.value),
+                  });
+                  load();
+                }}
+                title="Handelsplattform — Gebührenstaffel für künftige Käufe/Verkäufe"
+                className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs"
+              >
+                <option value="">Gebühren: keine</option>
+                {platforms.map((pl) => (
+                  <option key={pl.id} value={pl.id}>Gebühren: {pl.name}</option>
+                ))}
+              </select>
+              {p.fees_total > 0 && <span>bisher {p.fees_total.toLocaleString("de-DE")} gezahlt</span>}
+            </div>
             <div className="mt-3 flex items-center gap-3 text-xs text-slate-500">
               <button
                 onClick={() => toggleWatch(p)}
