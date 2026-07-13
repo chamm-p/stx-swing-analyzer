@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, runAnalysis, WatchlistEntry } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
+import SymbolSearch from "@/components/SymbolSearch";
 
 type Entry = WatchlistEntry & { last_close: number | null; last_news_at: string | null };
 
@@ -78,12 +79,8 @@ export default function WatchlistPage() {
       </div>
 
       <form onSubmit={add} className="flex gap-2">
-        <input
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-          placeholder="Symbol (z.B. AAPL, SAP.DE, BTC-USD)"
-          className="w-72 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500"
-        />
+        <SymbolSearch value={symbol} onChange={setSymbol}
+          placeholder="Symbol oder Name (z.B. Celsius, SAP.DE, BTC-USD)" />
         <button
           disabled={busy}
           className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500 disabled:opacity-50"

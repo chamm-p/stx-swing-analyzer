@@ -31,7 +31,14 @@ class PortfolioCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     kind: str = Field(default="real", pattern="^(real|trial|auto)$")
     platform_id: int | None = None
+    # Budget/"Spielgeld" — aktiviert Cash-Führung auch für real/trial
+    start_capital: float | None = Field(default=None, gt=0)
     config: AutoConfig | None = None
+
+
+def _tracks_cash(portfolio: Portfolio) -> bool:
+    """Cash-Führung: Auto immer; real/trial sobald Startkapital gesetzt."""
+    return portfolio.kind == "auto" or bool((portfolio.config or {}).get("start_capital"))
 
 
 class PositionCreate(BaseModel):
@@ -51,6 +58,7 @@ class PortfolioUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     watch_enabled: bool | None = None
     platform_id: int | None = None  # -1 = Plattform entfernen
+    start_capital: float | None = Field(default=None, gt=0)
     config: AutoConfig | None = None
 
 
@@ -138,12 +146,13 @@ async def _portfolio_summary(db: AsyncSession, portfolio: Portfolio) -> dict:
         "pnl_pct": round((value - invested) / invested * 100, 2) if invested else 0.0,
         "realized_pnl": round(realized, 2),
     }
-    if portfolio.kind == "auto":
+    if _tracks_cash(portfolio):
         cfg = portfolio.config or {}
         start = cfg.get("start_capital") or 0.0
         total = value + portfolio.cash
         out.update({
             "cash": round(portfolio.cash, 2),
+            "start_capital": start,
             "config": cfg,
             "total_value": round(total, 2),
             "total_pnl_abs": round(total - start, 2),
@@ -163,9 +172,14 @@ async def create_portfolio(payload: PortfolioCreate, db: AsyncSession = Depends(
     portfolio = Portfolio(name=payload.name.strip(), kind=payload.kind,
                           platform_id=payload.platform_id)
     if payload.kind == "auto":
-        cfg = (payload.config or AutoConfig()).model_dump()
-        portfolio.config = cfg
-        portfolio.cash = cfg["start_capital"]
+        cfg = payload.config or AutoConfig()
+        if payload.start_capital:
+            cfg.start_capital = payload.start_capital
+        portfolio.config = cfg.model_dump()
+        portfolio.cash = cfg.start_capital
+    elif payload.start_capital:
+        portfolio.config = {"start_capital": payload.start_capital}
+        portfolio.cash = payload.start_capital
     db.add(portfolio)
     await db.commit()
     return {"id": portfolio.id, "ok": True}
@@ -183,8 +197,16 @@ async def update_portfolio(portfolio_id: int, payload: PortfolioUpdate,
         portfolio.watch_enabled = payload.watch_enabled
     if payload.platform_id is not None:
         portfolio.platform_id = None if payload.platform_id == -1 else payload.platform_id
+    if payload.start_capital is not None:
+        # Startkapital-Änderung: Cash um die Differenz anpassen
+        cfg = dict(portfolio.config or {})
+        old = cfg.get("start_capital") or 0.0
+        cfg["start_capital"] = payload.start_capital
+        portfolio.config = cfg
+        portfolio.cash += payload.start_capital - old
     if payload.config is not None and portfolio.kind == "auto":
-        portfolio.config = payload.config.model_dump()
+        merged = payload.config.model_dump()
+        portfolio.config = {**(portfolio.config or {}), **merged}
     await db.commit()
     return {"ok": True}
 
@@ -281,8 +303,8 @@ async def add_position(portfolio_id: int, payload: PositionCreate,
         entry_price=entry_price, notes=payload.notes, fee_buy=fee,
     )
     db.add(position)
-    # Auto-Portfolios führen Cash — Kaufkosten inkl. Gebühr abbuchen
-    if portfolio.kind == "auto":
+    # Cash-geführte Portfolios: Kaufkosten inkl. Gebühr abbuchen
+    if _tracks_cash(portfolio):
         portfolio.cash -= payload.quantity * entry_price + fee
     await db.commit()
     return {"id": str(position.id), "entry_price": entry_price, "fee": fee, "ok": True}
@@ -338,13 +360,58 @@ async def close_position(position_id: uuid.UUID, payload: PositionClose,
         position.exit_date = now
         position.fee_sell = fee_sell
 
-    # Auto-Portfolios führen Cash — Verkaufserlös abzüglich Gebühr gutschreiben
-    if portfolio and portfolio.kind == "auto":
+    # Cash-geführte Portfolios: Verkaufserlös abzüglich Gebühr gutschreiben
+    if portfolio and _tracks_cash(portfolio):
         portfolio.cash += exit_price * sold_quantity - fee_sell
 
     await db.commit()
     return {"ok": True, "exit_price": exit_price, "sold_quantity": sold_quantity,
             "fee": fee_sell, "remaining": position.quantity if partial else 0}
+
+
+@router.post("/positions/{position_id}/reopen")
+async def reopen_position(position_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Verkauf rückgängig machen.
+
+    Teilverkaufs-Scheiben werden mit der offenen Rest-Position wieder
+    verschmolzen (Menge + Kaufgebühr zurück), Komplettverkäufe einfach
+    wieder geöffnet. Cash-geführte Portfolios buchen den Erlös zurück."""
+    position = await db.get(Position, position_id)
+    if not position:
+        raise HTTPException(status_code=404, detail="Position nicht gefunden")
+    if position.exit_date is None:
+        raise HTTPException(status_code=409, detail="Position ist offen — nichts rückgängig zu machen")
+
+    proceeds = (position.exit_price or 0.0) * position.quantity - (position.fee_sell or 0.0)
+    portfolio = await db.get(Portfolio, position.portfolio_id)
+
+    merged_into = None
+    if "Teilverkauf" in (position.notes or ""):
+        sibling = await db.scalar(
+            select(Position).where(
+                Position.portfolio_id == position.portfolio_id,
+                Position.symbol == position.symbol,
+                Position.exit_date.is_(None),
+                Position.entry_date == position.entry_date,
+                Position.entry_price == position.entry_price,
+            ).limit(1)
+        )
+        if sibling is not None:
+            sibling.quantity = round(sibling.quantity + position.quantity, 6)
+            sibling.fee_buy = round((sibling.fee_buy or 0.0) + (position.fee_buy or 0.0), 2)
+            merged_into = str(sibling.id)
+            await db.delete(position)
+
+    if merged_into is None:
+        position.exit_price = None
+        position.exit_date = None
+        position.fee_sell = 0.0
+
+    if portfolio and _tracks_cash(portfolio):
+        portfolio.cash -= proceeds
+
+    await db.commit()
+    return {"ok": True, "merged_into": merged_into}
 
 
 @router.delete("/positions/{position_id}")

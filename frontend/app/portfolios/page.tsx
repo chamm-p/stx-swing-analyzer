@@ -26,6 +26,7 @@ export default function PortfoliosPage() {
   const [platforms, setPlatforms] = useState<{ id: number; name: string }[]>([]);
   const [platformId, setPlatformId] = useState<number | "">("");
   const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", use_screener: true });
+  const [startCapital, setStartCapital] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -39,6 +40,9 @@ export default function PortfoliosPage() {
     if (!name.trim()) return;
     try {
       const body: any = { name: name.trim(), kind, platform_id: platformId === "" ? null : platformId };
+      if (kind !== "auto" && startCapital.trim()) {
+        body.start_capital = parseFloat(startCapital.replace(",", "."));
+      }
       if (kind === "auto") {
         body.config = {
           start_capital: parseFloat(cfg.start_capital.replace(",", ".")),
@@ -89,6 +93,12 @@ export default function PortfoliosPage() {
             <option value="">ohne Gebühren</option>
             {platforms.map((p) => <option key={p.id} value={p.id}>Gebühren: {p.name}</option>)}
           </select>
+          {kind !== "auto" && (
+            <input value={startCapital} onChange={(e) => setStartCapital(e.target.value)}
+              placeholder="Startkapital (optional)"
+              title="Budget/Spielgeld — aktiviert Cash-Führung: Käufe buchen ab, Verkäufe schreiben gut"
+              className="w-44 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500" />
+          )}
           <button className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">Anlegen</button>
         </div>
         {kind === "auto" && (
@@ -121,7 +131,7 @@ export default function PortfoliosPage() {
                 {(KIND_BADGE[p.kind] || KIND_BADGE.real).label}
               </span>
             </div>
-            {p.kind === "auto" && p.total_value !== undefined && (
+            {p.total_value !== undefined && (
               <div className="mt-2 text-sm">
                 <span className="font-semibold">{p.total_value.toLocaleString("de-DE", { maximumFractionDigits: 0 })}</span>
                 <span className="text-xs text-slate-500"> gesamt (davon Cash {p.cash?.toLocaleString("de-DE", { maximumFractionDigits: 0 })})</span>

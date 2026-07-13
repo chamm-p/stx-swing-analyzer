@@ -461,6 +461,52 @@ async def delete_source(source_id: int, db: AsyncSession = Depends(get_db)):
 
 # ---------------------------------------------------------------- Dashboard
 
+@router.get("/search")
+async def symbol_search(q: str):
+    """Symbolsuche nach Klarnamen (Yahoo-Suche, 1h Redis-Cache).
+
+    „Celsius Holdings" → CELH — für Watchlist-/Positions-Eingaben."""
+    import json as _json
+
+    import httpx
+
+    from app.services_redis import get_redis
+
+    q = q.strip()
+    if len(q) < 2:
+        return []
+    r = get_redis()
+    cache_key = f"search:{q.lower()}"
+    cached = await r.get(cache_key)
+    if cached is not None:
+        return _json.loads(cached)
+
+    out: list[dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0, headers={
+            "User-Agent": "Mozilla/5.0 (stx-swing-analyzer)",
+        }) as client:
+            resp = await client.get(
+                "https://query2.finance.yahoo.com/v1/finance/search",
+                params={"q": q, "quotesCount": 8, "newsCount": 0, "listsCount": 0},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        for item in data.get("quotes", []):
+            if not item.get("symbol"):
+                continue
+            out.append({
+                "symbol": item["symbol"],
+                "name": item.get("shortname") or item.get("longname"),
+                "exchange": item.get("exchDisp"),
+                "type": item.get("quoteType"),
+            })
+    except Exception as e:
+        logger.warning("Symbolsuche %r fehlgeschlagen: %s", q, e)
+    await r.set(cache_key, _json.dumps(out), ex=3600)
+    return out
+
+
 @router.get("/dashboard")
 async def dashboard(db: AsyncSession = Depends(get_db)):
     from app.analysis.watch_scope import effective_symbols

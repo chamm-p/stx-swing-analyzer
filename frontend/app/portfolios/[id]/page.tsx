@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import EquityChart from "@/components/EquityChart";
+import SymbolSearch from "@/components/SymbolSearch";
 
 type PositionRow = {
   id: string; symbol: string; quantity: number; entry_price: number; entry_date: string;
@@ -136,8 +137,8 @@ export default function PortfolioDetailPage() {
       </div>
 
       <form onSubmit={addPosition} className="flex flex-wrap gap-2">
-        <input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="Symbol"
-          className="w-40 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500" />
+        <SymbolSearch value={symbol} onChange={setSymbol} placeholder="Symbol oder Name"
+          className="w-56 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500" />
         <input value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="Stückzahl"
           className="w-32 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500" />
         <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Kaufkurs (leer = aktuell)"
@@ -189,8 +190,23 @@ export default function PortfolioDetailPage() {
                   )}
                 </td>
                 <td className="px-3 py-2 text-right text-xs">
-                  {p.is_open && (
+                  {p.is_open ? (
                     <button onClick={() => closePosition(p)} className="mr-2 text-amber-400 hover:underline">Verkaufen</button>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await api.post(`/api/positions/${p.id}/reopen`, {});
+                          load();
+                        } catch (e: any) {
+                          setError(e.message);
+                        }
+                      }}
+                      title="Verkauf rückgängig machen (Teilverkäufe werden wieder verschmolzen)"
+                      className="mr-2 text-sky-400 hover:underline"
+                    >
+                      ↩ Rückgängig
+                    </button>
                   )}
                   <button onClick={() => deletePosition(p)} className="text-rose-400 hover:underline">Löschen</button>
                 </td>
