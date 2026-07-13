@@ -54,6 +54,7 @@ async def get_watchlist(db: AsyncSession = Depends(get_db)):
             "name": asset.name if asset else None,
             "asset_type": asset.asset_type if asset else "stock",
             "currency": asset.currency if asset else None,
+            "last_close": await yahoo.latest_close(db, symbol),
             "last_news_at": last_news,
             "last_signal": _signal_dict(last_signal) if last_signal else None,
             **base,
