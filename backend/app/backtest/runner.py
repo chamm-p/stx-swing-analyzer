@@ -120,10 +120,6 @@ async def _execute(run_id: uuid.UUID) -> None:
                            "symbols_tested": len(data),
                            "windows": wf["windows"],
                            "param_wins": wf["param_wins"]}
-                run.metrics = metrics
-                run.equity = wf["equity"]
-                run.trades = []
-                run.warnings = []
                 # SPY-Benchmark über den Out-of-Sample-Zeitraum
                 if wf["equity"]:
                     spy = await load_ohlcv_df(db, "SPY", days=run.days)
@@ -137,6 +133,13 @@ async def _execute(run_id: uuid.UUID) -> None:
                             run.benchmark = _downsample(window / base * start_cap)
                             metrics["benchmark_return_pct"] = round(
                                 (float(window.iloc[-1]) / base - 1) * 100, 2)
+                # WICHTIG: Zuweisung NACH allen Mutationen — der SPY-SELECT
+                # triggert einen Autoflush, spätere Dict-Mutationen würden
+                # das JSONB-Feld nicht erneut dirty markieren
+                run.metrics = metrics
+                run.equity = wf["equity"]
+                run.trades = []
+                run.warnings = []
                 run.status = "done"
                 logger.info("Walk-Forward %s fertig: %s Fenster, OOS %s%%",
                             run_id, metrics.get("windows_tested"),
