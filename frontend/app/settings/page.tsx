@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
-type LlmView = { provider: string; base_url: string; model: string; has_api_key: boolean };
+type LlmView = {
+  provider: string; base_url: string; model: string;
+  reasoning_mode: string; has_api_key: boolean;
+};
 type CommView = {
   smtp_host: string; smtp_port: string | number; smtp_user: string; smtp_from: string;
   alert_email_to: string; has_smtp_password: boolean;
@@ -159,6 +162,7 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
   const [provider, setProvider] = useState(initial.provider);
   const [baseUrl, setBaseUrl] = useState(initial.base_url);
   const [model, setModel] = useState(initial.model);
+  const [reasoningMode, setReasoningMode] = useState(initial.reasoning_mode || "none");
   const [apiKey, setApiKey] = useState("");
   const [models, setModels] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -169,7 +173,8 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
   // ein erfolgreicher Test ohne Speichern für "eingerichtet" gehalten wird.
   const dirty =
     provider !== initial.provider || baseUrl !== initial.base_url ||
-    model !== initial.model || apiKey !== "";
+    model !== initial.model || reasoningMode !== (initial.reasoning_mode || "none") ||
+    apiKey !== "";
   const unsavedHint = dirty ? " ⚠️ Noch nicht gespeichert — die Analyse nutzt nur gespeicherte Werte!" : "";
 
   async function fetchModels() {
@@ -193,7 +198,8 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
     setMsg(null);
     try {
       await api.put("/api/settings/llm", {
-        provider, base_url: baseUrl, model, api_key: apiKey || null,
+        provider, base_url: baseUrl, model, reasoning_mode: reasoningMode,
+        api_key: apiKey || null,
       });
       setApiKey("");
       setMsg("Gespeichert.");
@@ -208,7 +214,8 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
     setMsg(null);
     try {
       const res = await api.post("/api/settings/llm/test", {
-        provider, base_url: baseUrl, model, api_key: apiKey || null,
+        provider, base_url: baseUrl, model, reasoning_mode: reasoningMode,
+        api_key: apiKey || null,
       });
       setMsg(`✅ ${res.model} antwortet in ${res.latency_ms} ms: „${res.reply}"${unsavedHint}`);
     } catch (e: any) {
@@ -230,6 +237,16 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
         </Field>
         <Field label="Base-URL (vLLM, Ollama, OpenRouter, …)">
           <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className={inputCls + " w-96"} />
+        </Field>
+        <Field label="Thinking/Reasoning">
+          <select value={reasoningMode} onChange={(e) => setReasoningMode(e.target.value)}
+            className={inputCls + " w-64"}
+            title="Reasoning-Modelle denken sonst exzessiv — kostet Latenz und Tokens">
+            <option value="none">Nicht steuern (Modell entscheidet)</option>
+            <option value="qwen_template">Aus — Qwen3/3.5/3.6 auf vLLM</option>
+            <option value="openai_effort">Minimal — OpenAI o-Serie/GPT-5</option>
+            <option value="disable_field">Aus — MiniMax-Stil (disable_thinking)</option>
+          </select>
         </Field>
         <Field label={`API-Key ${initial.has_api_key ? "(gespeichert — leer lassen zum Behalten)" : ""}`}>
           <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}

@@ -37,6 +37,7 @@ class LLMClient:
         self.base_url = (cfg.get("base_url") or s.llm_base_url).rstrip("/")
         self.api_key = cfg.get("api_key") or s.llm_api_key
         self.model = cfg.get("model") or s.llm_model
+        self.reasoning_mode = cfg.get("reasoning_mode") or s.llm_reasoning_mode
         self.max_tokens = s.llm_max_tokens
         self.temperature = s.llm_temperature
         self.cache_ttl = s.llm_cache_ttl
@@ -66,6 +67,10 @@ class LLMClient:
                     text = await self._anthropic(system, user)
                 else:
                     text = await self._openai(system, user)
+                # Defensiv: <think>-Blöcke entfernen (Setups ohne
+                # Reasoning-Parser liefern das Thinking im Content mit
+                # und brechen sonst das JSON-Parsing).
+                text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
                 if self.cache_ttl > 0:
                     await get_redis().set(cache_key, text, ex=self.cache_ttl)
                 return text
@@ -108,6 +113,17 @@ class LLMClient:
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
         }
+        # Thinking/Reasoning für Analyse-Calls IMMER aus — Qwen & Co. denken
+        # sonst exzessiv (Latenz + Tokens). Modi aus cura_llm übernommen.
+        if self.reasoning_mode == "qwen_template":
+            # Qwen-3 + vLLM — chat_template_kwargs ist Pflicht.
+            payload["chat_template_kwargs"] = {"enable_thinking": False, "thinking_budget": 0}
+        elif self.reasoning_mode == "openai_effort":
+            payload["reasoning_effort"] = "minimal"
+        elif self.reasoning_mode == "disable_field":
+            payload["disable_thinking"] = True
+        # "none": nichts mitsenden — Modell/Server entscheidet selbst.
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
             resp.raise_for_status()

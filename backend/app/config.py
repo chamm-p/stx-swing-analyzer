@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
+    # Thinking/Reasoning abschalten (Muster aus cura_llm providers/openai.py):
+    # none | qwen_template (Qwen3+vLLM) | openai_effort (o-Serie/GPT-5)
+    # | disable_field (MiniMax-Stil)
+    llm_reasoning_mode: str = "none"
     llm_cache_ttl: int = 86400
     llm_max_tokens: int = 1500
     llm_temperature: float = 0.2

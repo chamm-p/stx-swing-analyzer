@@ -49,6 +49,7 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "provider": ("llm_provider", False),
         "base_url": ("llm_base_url", False),
         "model": ("llm_model", False),
+        "reasoning_mode": ("llm_reasoning_mode", False),
         "api_key": ("llm_api_key", True),
     },
     "mcp": {

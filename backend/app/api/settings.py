@@ -25,6 +25,7 @@ class LlmSettings(BaseModel):
     provider: str | None = None
     base_url: str | None = None
     model: str | None = None
+    reasoning_mode: str | None = None  # none | qwen_template | openai_effort | disable_field
     api_key: str | None = None  # leer = Bestand behalten
 
 
@@ -51,6 +52,9 @@ async def get_all_settings(db: AsyncSession = Depends(get_db)):
 async def put_llm(payload: LlmSettings, db: AsyncSession = Depends(get_db)):
     if payload.provider and payload.provider not in ("openai", "anthropic"):
         raise HTTPException(status_code=422, detail="provider muss 'openai' oder 'anthropic' sein")
+    if payload.reasoning_mode and payload.reasoning_mode not in (
+            "none", "qwen_template", "openai_effort", "disable_field"):
+        raise HTTPException(status_code=422, detail="Ungültiger reasoning_mode")
     await save_settings(db, "llm", payload.model_dump(exclude_none=True))
     return await public_view(db, "llm")
 

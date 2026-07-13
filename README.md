@@ -138,7 +138,16 @@ die Pipeline manuell an.
 
 **UI-Einstellungen** (Seite „Einstellungen"): LLM (Provider, Base-URL,
 API-Key, Modell — mit „Modelle laden" direkt vom Provider als
-Verbindungstest), E-Mail/SMTP, Telegram und die News-Datenquellen.
+Verbindungstest — und **Thinking/Reasoning-Steuerung**), E-Mail/SMTP,
+Telegram und die News-Datenquellen.
+
+**Reasoning-Modelle (Qwen3.x, o-Serie, …):** Für Analyse-Calls sollte
+Thinking abgeschaltet werden — Qwen3.5 auf vLLM antwortete im Test mit
+Thinking in ~13.4 s, ohne in ~0.25 s. Modi (Muster aus cura_llm):
+`qwen_template` (vLLM `chat_template_kwargs.enable_thinking=false`),
+`openai_effort` (`reasoning_effort=minimal`), `disable_field`
+(MiniMax-Stil), `none`. Zusätzlich werden `<think>…</think>`-Blöcke
+defensiv aus Antworten entfernt (Setups ohne Reasoning-Parser).
 UI-Werte liegen in der DB (Secrets Fernet-verschlüsselt mit dem
 `SECRET_KEY`), überschreiben die `.env`-Defaults sofort für Backend und
 Worker und lassen sich pro Sektion auf die `.env` zurücksetzen.
