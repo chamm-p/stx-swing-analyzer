@@ -51,6 +51,18 @@ async def evaluate_signals(db: AsyncSession) -> int:
             s.eval_hit = ret > 0
         elif s.action == "SELL":
             s.eval_hit = ret < 0
+        # Kursziel im Horizont erreicht? (Intraday-Extrem, nicht nur Close)
+        if s.target_price and s.action in ("BUY", "SELL"):
+            from sqlalchemy import func as _f
+            row = (await db.execute(
+                select(_f.max(Ohlcv.high), _f.min(Ohlcv.low)).where(
+                    Ohlcv.symbol == s.symbol, Ohlcv.ts >= s.ts, Ohlcv.ts <= target,
+                )
+            )).one()
+            hi, lo = row
+            if hi is not None:
+                s.eval_target_hit = (hi >= s.target_price) if s.action == "BUY" \
+                    else (lo <= s.target_price)
         s.evaluated_at = now
         done += 1
     if done:
@@ -71,12 +83,16 @@ async def review_summary(db: AsyncSession) -> dict:
     groups: dict[tuple, dict] = {}
     for s, asset_type in rows:
         key = (s.action, asset_type or "stock")
-        g = groups.setdefault(key, {"count": 0, "hits": 0, "hit_total": 0, "returns": []})
+        g = groups.setdefault(key, {"count": 0, "hits": 0, "hit_total": 0, "returns": [],
+                                    "target_hits": 0, "target_total": 0})
         g["count"] += 1
         g["returns"].append(s.eval_return_pct)
         if s.eval_hit is not None:
             g["hit_total"] += 1
             g["hits"] += 1 if s.eval_hit else 0
+        if s.eval_target_hit is not None:
+            g["target_total"] += 1
+            g["target_hits"] += 1 if s.eval_target_hit else 0
 
     pending = await db.scalar(
         select(Signal.id).where(Signal.evaluated_at.is_(None)).limit(1)
@@ -89,6 +105,7 @@ async def review_summary(db: AsyncSession) -> dict:
             "asset_type": asset_type,
             "count": g["count"],
             "hit_rate": round(g["hits"] / g["hit_total"], 3) if g["hit_total"] else None,
+            "target_hit_rate": round(g["target_hits"] / g["target_total"], 3) if g["target_total"] else None,
             "avg_return_pct": round(sum(g["returns"]) / len(g["returns"]), 2),
         } for (action, asset_type), g in sorted(groups.items())],
     }

@@ -10,6 +10,7 @@ type Group = {
   asset_type: string;
   count: number;
   hit_rate: number | null;
+  target_hit_rate: number | null;
   avg_return_pct: number;
 };
 
@@ -86,6 +87,7 @@ export default function ReviewPage() {
                 <th className="px-3 py-2">Asset-Klasse</th>
                 <th className="px-3 py-2">Anzahl</th>
                 <th className="px-3 py-2">Trefferquote</th>
+                <th className="px-3 py-2">Kursziel erreicht</th>
                 <th className="px-3 py-2">Ø Rendite n. Horizont</th>
               </tr>
             </thead>
@@ -96,6 +98,7 @@ export default function ReviewPage() {
                   <td className="px-3 py-2 text-slate-400">{g.asset_type}</td>
                   <td className="px-3 py-2">{g.count}</td>
                   <td className="px-3 py-2">{g.hit_rate !== null ? `${(g.hit_rate * 100).toFixed(0)}%` : "—"}</td>
+                  <td className="px-3 py-2">{g.target_hit_rate !== null ? `${(g.target_hit_rate * 100).toFixed(0)}%` : "—"}</td>
                   <td className={`px-3 py-2 font-mono ${g.avg_return_pct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                     {g.avg_return_pct >= 0 ? "+" : ""}{g.avg_return_pct.toFixed(2)}%
                   </td>

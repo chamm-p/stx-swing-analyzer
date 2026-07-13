@@ -18,10 +18,17 @@ logger = logging.getLogger(__name__)
 
 def _format_message(signal: Signal, asset: Asset) -> str:
     emoji = {"BUY": "🟢", "SELL": "🔴"}.get(signal.action, "⚪")
+    target_line = ""
+    if signal.target_price:
+        target_line = f"Ziel: {signal.target_price} | Stop: {signal.stop_price} | CRV 1:{signal.risk_reward}"
+        if signal.analyst_target:
+            target_line += f" | Analysten-Konsens: {signal.analyst_target}"
+        target_line += "\n"
     return (
         f"{emoji} {signal.action}: {asset.symbol} ({asset.name or ''})\n"
         f"Kurs: {signal.price_at_signal} | Confidence: {signal.confidence:.0%} | "
         f"Horizont: ~{signal.horizon_days} Tage\n"
+        f"{target_line}"
         f"Scores — technisch {signal.technical_score:+.2f}, "
         f"Sentiment {signal.sentiment_score:+.2f}, fundamental {signal.fundamental_score:+.2f}\n\n"
         f"{signal.rationale or ''}\n\n"

@@ -57,6 +57,11 @@ export type Signal = {
   rationale: string | null;
   horizon_days: number;
   price_at_signal: number | null;
+  target_price: number | null;
+  stop_price: number | null;
+  risk_reward: number | null;
+  analyst_target: number | null;
+  analyst_count: number | null;
 };
 
 export type WatchlistEntry = {

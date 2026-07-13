@@ -46,7 +46,8 @@ export default function DashboardPage() {
                   <th className="px-3 py-2">Symbol</th>
                   <th className="px-3 py-2">Signal</th>
                   <th className="px-3 py-2">Kurs</th>
-                  <th className="px-3 py-2">Scores (T/S/F)</th>
+                  <th className="px-3 py-2">Ziel / Stop</th>
+                  <th className="px-3 py-2">CRV</th>
                   <th className="px-3 py-2">Horizont</th>
                 </tr>
               </thead>
@@ -62,8 +63,15 @@ export default function DashboardPage() {
                     <td className="px-3 py-2"><SignalBadge action={s.action} confidence={s.confidence} /></td>
                     <td className="px-3 py-2">{s.price_at_signal ?? "—"}</td>
                     <td className="px-3 py-2 text-slate-400">
-                      {fmt(s.technical_score)} / {fmt(s.sentiment_score)} / {fmt(s.fundamental_score)}
+                      {s.target_price ? (
+                        <>
+                          <span className="text-emerald-400">{s.target_price.toFixed(2)}</span>
+                          {" / "}
+                          <span className="text-rose-400">{s.stop_price?.toFixed(2)}</span>
+                        </>
+                      ) : "—"}
                     </td>
+                    <td className="px-3 py-2 text-slate-400">{s.risk_reward ? `1:${s.risk_reward}` : "—"}</td>
                     <td className="px-3 py-2 text-slate-400">~{s.horizon_days}d</td>
                   </tr>
                 ))}

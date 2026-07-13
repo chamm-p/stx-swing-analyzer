@@ -141,6 +141,9 @@ def _signal_dict(s: Signal) -> dict:
         "technical_score": s.technical_score, "sentiment_score": s.sentiment_score,
         "fundamental_score": s.fundamental_score, "rationale": s.rationale,
         "horizon_days": s.horizon_days, "price_at_signal": s.price_at_signal,
+        "target_price": s.target_price, "stop_price": s.stop_price,
+        "risk_reward": s.risk_reward, "analyst_target": s.analyst_target,
+        "analyst_count": s.analyst_count,
         "indicators": s.indicators, "delivered": s.delivered,
     }
 

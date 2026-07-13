@@ -146,6 +146,9 @@ class Position(Base):
     source: Mapped[str] = mapped_column(String(10), default="manual")  # manual | auto
     signal_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     horizon_days: Mapped[int | None] = mapped_column(Integer)
+    # Take-Profit/Stop-Loss für Auto-Positionen (aus dem Signal übernommen)
+    target_price: Mapped[float | None] = mapped_column(Float)
+    stop_price: Mapped[float | None] = mapped_column(Float)
 
 
 class UniverseSymbol(Base):
@@ -200,8 +203,15 @@ class Signal(Base):
     indicators: Mapped[dict | None] = mapped_column(JSONB)
     price_at_signal: Mapped[float | None] = mapped_column(Float)
     delivered: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Kursziel/Stop (ATR-Zielzone) + Analysten-Konsens (Yahoo, nur Aktien)
+    target_price: Mapped[float | None] = mapped_column(Float)
+    stop_price: Mapped[float | None] = mapped_column(Float)
+    risk_reward: Mapped[float | None] = mapped_column(Float)
+    analyst_target: Mapped[float | None] = mapped_column(Float)
+    analyst_count: Mapped[int | None] = mapped_column(Integer)
     # Signal-Review: Auswertung nach Ablauf des Horizonts
     eval_price: Mapped[float | None] = mapped_column(Float)
     eval_return_pct: Mapped[float | None] = mapped_column(Float)
     eval_hit: Mapped[bool | None] = mapped_column(Boolean)  # nur BUY/SELL
+    eval_target_hit: Mapped[bool | None] = mapped_column(Boolean)  # Ziel im Horizont erreicht?
     evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -51,24 +51,38 @@ async def _open_positions(db: AsyncSession, portfolio_id: int) -> list[Position]
     return list(result.scalars().all())
 
 
-async def _close(db: AsyncSession, pf: Portfolio, p: Position, reason: str) -> bool:
-    price = await latest_close(db, p.symbol)
-    if price is None:
-        return False
+def _do_close(pf: Portfolio, p: Position, price: float, reason: str) -> None:
     p.exit_price = price
     p.exit_date = utcnow()
     p.notes = f"{p.notes or ''} | Exit: {reason}".strip(" |")
     pf.cash += price * p.quantity
     logger.info("Auto-Portfolio %s: %s verkauft zu %.4f (%s)", pf.name, p.symbol, price, reason)
-    return True
 
 
 async def _run_exits(db: AsyncSession, pf: Portfolio) -> int:
+    """Exit-Prioritäten: Stop-Loss → Take-Profit → SELL-Signal → Horizont.
+
+    Grundlage sind Tagesschlusskurse (Paper-Trading) — Stop/Ziel werden
+    also am Close geprüft, nicht intraday."""
     closed = 0
     for p in await _open_positions(db, pf.id):
+        price = await latest_close(db, p.symbol)
+        if price is None:
+            continue
+
+        if p.stop_price and price <= p.stop_price:
+            _do_close(pf, p, price, f"Stop-Loss ({p.stop_price}) erreicht")
+            closed += 1
+            continue
+        if p.target_price and price >= p.target_price:
+            _do_close(pf, p, price, f"Kursziel ({p.target_price}) erreicht")
+            closed += 1
+            continue
+
         horizon = p.horizon_days or 14
         if utcnow() >= p.entry_date + timedelta(days=horizon):
-            closed += await _close(db, pf, p, f"Horizont ({horizon}d) abgelaufen")
+            _do_close(pf, p, price, f"Horizont ({horizon}d) abgelaufen")
+            closed += 1
             continue
         sell_signal = await db.scalar(
             select(Signal).where(
@@ -77,7 +91,8 @@ async def _run_exits(db: AsyncSession, pf: Portfolio) -> int:
             ).order_by(desc(Signal.ts)).limit(1)
         )
         if sell_signal is not None:
-            closed += await _close(db, pf, p, "SELL-Signal")
+            _do_close(pf, p, price, "SELL-Signal")
+            closed += 1
     return closed
 
 
@@ -159,11 +174,33 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
             logger.warning("Asset-Stammdaten für %s nicht ladbar: %s", symbol, e)
         budget = min(cfg["max_per_trade"], pf.cash)
         quantity = round(budget / price, 6)
+
+        # Take-Profit/Stop aus dem Signal übernehmen; für Screener-Käufe
+        # frisch aus den aktuellen Indikatoren berechnen.
+        target_price = stop_price = None
+        if cand["signal_id"]:
+            sig = await db.get(Signal, cand["signal_id"])
+            if sig:
+                target_price, stop_price = sig.target_price, sig.stop_price
+        if target_price is None:
+            from app.analysis.targets import compute_price_targets
+            from app.processing.indicators import compute_indicators
+            from app.sources.yahoo import load_ohlcv_df
+            df = await load_ohlcv_df(db, symbol)
+            if not df.empty:
+                snapshot = compute_indicators(df)["snapshot"]
+                targets = compute_price_targets(snapshot, "BUY", cand["horizon_days"] or 14)
+                if targets:
+                    target_price = targets["target_price"]
+                    stop_price = targets["stop_price"]
+
         db.add(Position(
             portfolio_id=pf.id, symbol=symbol, quantity=quantity,
             entry_price=price, source="auto", signal_id=cand["signal_id"],
             horizon_days=cand["horizon_days"],
-            notes=f"Auto-Kauf ({cand['origin']}, Rank {cand['rank']:+.2f})",
+            target_price=target_price, stop_price=stop_price,
+            notes=f"Auto-Kauf ({cand['origin']}, Rank {cand['rank']:+.2f}, "
+                  f"Ziel {target_price}, Stop {stop_price})",
         ))
         pf.cash -= quantity * price
         held.add(symbol)

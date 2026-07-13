@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.alerts.dispatcher import dispatch_signal_alert
 from app.analysis.llm_analysis import analyze_pending_sentiment, asset_review, recent_scored_articles
 from app.analysis.scoring import aggregate_sentiment, score_signal
+from app.analysis.targets import compute_price_targets
 from app.analysis.watch_scope import alert_config, effective_symbols
 from app.config import get_settings
 from app.llm.client import LLMClient, LLMError
@@ -68,12 +69,31 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
                     symbol, result.action, result.composite)
         return None
 
+    horizon_days = int(review.get("suggested_horizon_days") or 14)
+
+    # Kursziel/Stop/CRV (ATR-Zielzone) + Analysten-Konsens (nur Aktien/ETFs)
+    targets = compute_price_targets(snapshot, result.action, horizon_days) or {}
+    analyst: dict = {}
+    if result.action in ("BUY", "SELL") and asset.asset_type != "crypto":
+        try:
+            from app.sources.yahoo import fetch_analyst_targets
+            analyst = await fetch_analyst_targets(symbol)
+        except Exception as e:
+            logger.warning("Analystenziele für %s nicht abrufbar: %s", symbol, e)
+
     rationale_parts = [
         f"Technisch {result.technical:+.2f} [Profil {result.profile}] (" +
         ", ".join(f"{k} {v:+.2f}" for k, v in result.components.items()) + ")",
         f"Sentiment {result.sentiment:+.2f} aus {len(articles)} News",
         f"Fundamental {result.fundamental:+.2f}",
     ]
+    if targets:
+        rationale_parts.append(
+            f"Ziel {targets['target_price']} · Stop {targets['stop_price']} · "
+            f"CRV 1:{targets['risk_reward']}"
+        )
+    if analyst.get("mean"):
+        rationale_parts.append(f"Analysten-Konsens {analyst['mean']} ({analyst.get('count')} Schätzungen)")
     if review.get("summary"):
         rationale_parts.append(str(review["summary"]))
 
@@ -86,9 +106,14 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
         sentiment_score=result.sentiment,
         fundamental_score=result.fundamental,
         rationale=" — ".join(rationale_parts),
-        horizon_days=int(review.get("suggested_horizon_days") or 14),
+        horizon_days=horizon_days,
         indicators=snapshot,
         price_at_signal=snapshot.get("close"),
+        target_price=targets.get("target_price"),
+        stop_price=targets.get("stop_price"),
+        risk_reward=targets.get("risk_reward"),
+        analyst_target=analyst.get("mean"),
+        analyst_count=analyst.get("count"),
     )
     db.add(signal)
     await db.commit()

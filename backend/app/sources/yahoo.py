@@ -143,6 +143,34 @@ async def fetch_profile(symbol: str) -> dict:
     return profile
 
 
+async def fetch_analyst_targets(symbol: str) -> dict:
+    """Analysten-Konsensziele (Yahoo) — Redis-gecacht (24h), fail-soft leer.
+
+    Für Krypto liefert Yahoo keine Analystenziele → leeres dict."""
+    import json
+
+    from app.services_redis import get_redis
+
+    r = get_redis()
+    cache_key = f"analyst:{symbol}"
+    cached = await r.get(cache_key)
+    if cached is not None:
+        return json.loads(cached)
+
+    try:
+        info = await asyncio.to_thread(_fetch_info_sync, symbol)
+    except Exception:
+        info = {}
+    out = {
+        "mean": info.get("targetMeanPrice"),
+        "high": info.get("targetHighPrice"),
+        "low": info.get("targetLowPrice"),
+        "count": info.get("numberOfAnalystOpinions"),
+    }
+    await r.set(cache_key, json.dumps(out), ex=86400)
+    return out
+
+
 async def latest_close(db: AsyncSession, symbol: str) -> float | None:
     result = await db.execute(
         select(Ohlcv.close).where(Ohlcv.symbol == symbol).order_by(Ohlcv.ts.desc()).limit(1)

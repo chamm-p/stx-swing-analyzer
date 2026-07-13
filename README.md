@@ -53,8 +53,16 @@ Swing-Trading (Aktien/ETFs, Horizont 3–30 Tage).
 
    Das Profil wird automatisch gewählt: im Screener über das
    Universum-Segment, in der Watchlist-Pipeline über den Asset-Typ.
-5. **Alerts** — Telegram und/oder E-Mail bei neuen BUY/SELL-Signalen
-   (pro Asset abschaltbar, Confidence-Schwelle konfigurierbar)
+5. **Kursziel & Stop (BUY/SELL)** — deterministische ATR-Zielzone:
+   Ziel = Kurs ± 2·ATR(14)·√(Horizont/14), gedeckelt an der jüngsten
+   Swing-Marke (60d-Hoch/-Tief); Stop = Kurs ∓ 1.5·ATR → CRV pro Signal.
+   Für Aktien/ETFs zusätzlich der **Analysten-Konsens** (Yahoo,
+   targetMeanPrice, 24h gecacht) als externer Vergleichswert. Das
+   Signal-Review misst, wie oft Ziele im Horizont erreicht wurden
+   („Kursziel erreicht"-Quote) — Datenbasis fürs Tuning der Faktoren.
+6. **Alerts** — Telegram und/oder E-Mail bei neuen BUY/SELL-Signalen
+   inkl. Ziel/Stop/CRV (pro Asset abschaltbar, Confidence-Schwelle
+   konfigurierbar)
 
 Signale werden dedupliziert: ein neues Signal entsteht nur bei
 Richtungswechsel oder nach Ablauf von `SIGNAL_REFRESH_HOURS`.
@@ -86,9 +94,11 @@ Ein Portfolio vom Typ **Auto** handelt die System-Signale selbständig —
 als reines Paper-Trading, ohne echtes Geld und ohne Order-Ausführung.
 Rahmenbedingungen pro Portfolio: Startkapital, max. Volumen pro Trade,
 max. offene Positionen, Mindest-Confidence, optional Screener-BUYs.
-Käufe bei BUY-Signalen, Verkäufe bei SELL-Signal oder Horizont-Ablauf;
-3-Tage-Wiedereinstiegs-Cooldown gegen Kauf/Verkauf-Pingpong. Cash und
-Gesamt-P/L seit Start werden mitgeführt.
+Käufe bei BUY-Signalen (Ziel/Stop werden aus dem Signal übernommen bzw.
+für Screener-Käufe frisch berechnet); Verkäufe nach Priorität
+**Stop-Loss → Take-Profit → SELL-Signal → Horizont-Ablauf** (geprüft am
+Tagesschluss); 3-Tage-Wiedereinstiegs-Cooldown gegen
+Kauf/Verkauf-Pingpong. Cash und Gesamt-P/L seit Start werden mitgeführt.
 
 Das **Signal-Review** (Seite „Review") bewertet unabhängig davon JEDES
 Signal nach Ablauf seines Horizonts gegen die tatsächliche

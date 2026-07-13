@@ -184,10 +184,22 @@ export default function AssetPage() {
           <div className="space-y-2">
             {[...chart!.signals].reverse().map((s) => (
               <div key={s.id} className="rounded border border-slate-800 bg-slate-900/40 p-3 text-sm">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <SignalBadge action={s.action} confidence={s.confidence} />
                   <span className="text-slate-400">{new Date(s.ts).toLocaleString("de-DE")}</span>
                   <span className="text-slate-400">Kurs {s.price_at_signal ?? "—"}</span>
+                  {s.target_price && (
+                    <span className="text-slate-400">
+                      Ziel <span className="text-emerald-400">{s.target_price.toFixed(2)}</span>
+                      {" · "}Stop <span className="text-rose-400">{s.stop_price?.toFixed(2)}</span>
+                      {" · "}CRV 1:{s.risk_reward}
+                    </span>
+                  )}
+                  {s.analyst_target && (
+                    <span className="text-xs text-slate-500" title={`${s.analyst_count} Analystenschätzungen`}>
+                      Analysten: {s.analyst_target.toFixed(2)}
+                    </span>
+                  )}
                 </div>
                 {s.rationale && <p className="mt-1 text-xs text-slate-400">{s.rationale}</p>}
               </div>

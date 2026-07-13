@@ -31,6 +31,17 @@ def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
     return macd_line, signal_line, histogram
 
 
+def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Average True Range (Wilder) — Basis für volatilitätsskalierte Ziele."""
+    prev_close = df["close"].shift(1)
+    tr = pd.concat([
+        df["high"] - df["low"],
+        (df["high"] - prev_close).abs(),
+        (df["low"] - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr.ewm(alpha=1 / period, min_periods=period).mean()
+
+
 def bollinger(close: pd.Series, period: int = 20, num_std: float = 2.0):
     mid = close.rolling(period).mean()
     std = close.rolling(period).std()
@@ -69,8 +80,14 @@ def compute_indicators(df: pd.DataFrame) -> dict:
 
     prev_hist = hist.iloc[-2] if len(hist) >= 2 else math.nan
 
+    atr14 = atr(df)
+
     snapshot = {
         "close": last(close),
+        "atr14": last(atr14),
+        # Swing-Marken für Kursziel/Stop (60 Handelstage ≈ 3 Monate)
+        "high_60d": round(float(df["high"].tail(60).max()), 4),
+        "low_60d": round(float(df["low"].tail(60).min()), 4),
         "rsi14": last(out_series["rsi14"]),
         "macd": last(macd_line),
         "macd_signal": last(signal_line),
