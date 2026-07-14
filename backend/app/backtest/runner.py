@@ -106,6 +106,19 @@ async def _execute(run_id: uuid.UUID) -> None:
             min_train_score = stored.pop("min_train_score", 0.0)
             overrides = {k: v for k, v in stored.items() if k in _PARAM_KEYS}
 
+            # Retention-Guard: Backfill-Daten jenseits des Retention-
+            # Fensters werden von TimescaleDB wieder GELÖSCHT — ein
+            # langer Backtest wäre nur scheinbar möglich (einmalig).
+            from app.config import get_settings
+            retention = get_settings().retention_ohlcv_days
+            if run.days > retention:
+                raise RuntimeError(
+                    f"Zeitraum {run.days} Tage > Retention-Fenster "
+                    f"(RETENTION_OHLCV_DAYS={retention}): Die Retention-Policy "
+                    f"löscht ältere Kurse wieder. In der .env auf mindestens "
+                    f"{run.days} erhöhen und Stack neu starten."
+                )
+
             q = select(UniverseSymbol).where(UniverseSymbol.active == True)  # noqa: E712
             if run.segment:
                 q = q.where(UniverseSymbol.segment == run.segment)
