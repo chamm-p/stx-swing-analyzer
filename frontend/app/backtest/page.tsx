@@ -238,7 +238,24 @@ export default function BacktestPage() {
             <h2 className="font-semibold">
               Lauf {detail.label || detail.id.slice(0, 8)} — {detail.segment}, {Math.round(detail.days / 365)}J
             </h2>
-            <button onClick={() => setDetail(null)} className="ml-auto text-xs text-slate-500 hover:text-white">✕ schließen</button>
+            <button
+              onClick={async () => {
+                const name = window.prompt("Name für das Challenger-Portfolio?",
+                  `Challenger ${detail.label || detail.id.slice(0, 8)}`);
+                if (!name) return;
+                try {
+                  const res = await api.post(`/api/backtest/runs/${detail.id}/apply`, { name });
+                  setMsg(`✅ Challenger „${res.name}" angelegt (Schwelle ${res.strategy.threshold}) — papertradet ab jetzt parallel, siehe Portfolios.`);
+                } catch (e: any) {
+                  setMsg(`❌ ${e.message}`);
+                }
+              }}
+              className="ml-auto rounded border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-emerald-500"
+              title="Diese Parameter als Auto-Portfolio mit eigenem Scoring live papertraden lassen"
+            >
+              🧪 Als Challenger übernehmen
+            </button>
+            <button onClick={() => setDetail(null)} className="text-xs text-slate-500 hover:text-white">✕ schließen</button>
           </div>
           <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
             <Stat label="Rendite" value={`${detail.total_return_pct}%`}

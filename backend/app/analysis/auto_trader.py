@@ -36,6 +36,29 @@ DEFAULT_CONFIG = {
     "enabled": True,
 }
 
+# Felder einer Challenger-Strategie (aus Backtest übernommen)
+STRATEGY_KEYS = ("rsi_oversold", "rsi_overbought", "rsi_scale", "macd_scale",
+                 "w_rsi", "w_macd", "w_bollinger", "w_trend",
+                 "threshold", "target_atr_factor", "stop_atr_factor",
+                 "horizon_days")
+
+
+def strategy_profile(strategy: dict):
+    """ScoringProfile aus einer Challenger-Strategie (Defaults = stock)."""
+    from app.analysis.scoring import PROFILES, ScoringProfile
+    base = PROFILES["stock"]
+    return ScoringProfile(
+        name="challenger",
+        rsi_oversold=float(strategy.get("rsi_oversold", base.rsi_oversold)),
+        rsi_overbought=float(strategy.get("rsi_overbought", base.rsi_overbought)),
+        rsi_scale=float(strategy.get("rsi_scale", base.rsi_scale)),
+        macd_scale=float(strategy.get("macd_scale", base.macd_scale)),
+        w_rsi=float(strategy.get("w_rsi", base.w_rsi)),
+        w_macd=float(strategy.get("w_macd", base.w_macd)),
+        w_bollinger=float(strategy.get("w_bollinger", base.w_bollinger)),
+        w_trend=float(strategy.get("w_trend", base.w_trend)),
+    )
+
 # Nach einem Exit dasselbe Symbol einige Tage nicht erneut kaufen —
 # verhindert Kauf/Verkauf-Pingpong um die Schwelle herum.
 _REENTRY_COOLDOWN_DAYS = 3
@@ -62,13 +85,30 @@ def _do_close(pf: Portfolio, p: Position, price: float, reason: str,
                 pf.name, p.symbol, price, reason, fee)
 
 
-async def _run_exits(db: AsyncSession, pf: Portfolio) -> int:
-    """Exit-Prioritäten: Stop-Loss → Take-Profit → SELL-Signal → Horizont.
+async def _strategy_score(db: AsyncSession, symbol: str, strategy: dict) -> float | None:
+    """Technischer Score eines Symbols mit Challenger-Parametern."""
+    from app.analysis.scoring import technical_score
+    from app.processing.indicators import compute_indicators
+    from app.sources.yahoo import load_ohlcv_df
+
+    df = await load_ohlcv_df(db, symbol, days=450)
+    if df.empty or len(df) < 60:
+        return None
+    snapshot = compute_indicators(df)["snapshot"]
+    score, _ = technical_score(snapshot, strategy_profile(strategy))
+    return score
+
+
+async def _run_exits(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
+    """Exit-Prioritäten: Stop-Loss → Take-Profit → Exit-Signal → Horizont.
 
     Grundlage sind Tagesschlusskurse (Paper-Trading) — Stop/Ziel werden
-    also am Close geprüft, nicht intraday."""
+    also am Close geprüft, nicht intraday. Challenger-Portfolios nutzen
+    ihr eigenes Scoring statt der globalen SELL-Signale."""
     from app.analysis.fees import portfolio_fee
     from app.models import Asset
+
+    strategy = cfg.get("strategy")
 
     closed = 0
     for p in await _open_positions(db, pf.id):
@@ -93,6 +133,12 @@ async def _run_exits(db: AsyncSession, pf: Portfolio) -> int:
             _do_close(pf, p, price, f"Horizont ({horizon}d) abgelaufen", fee)
             closed += 1
             continue
+        if strategy:
+            score = await _strategy_score(db, p.symbol, strategy)
+            if score is not None and score <= -float(strategy.get("threshold", 0.35)):
+                _do_close(pf, p, price, f"Strategie-Exit (Score {score:+.2f})", fee)
+                closed += 1
+            continue
         sell_signal = await db.scalar(
             select(Signal).where(
                 Signal.symbol == p.symbol, Signal.action == "SELL",
@@ -116,10 +162,55 @@ async def _recently_traded(db: AsyncSession, portfolio_id: int, symbol: str) -> 
     return row is not None
 
 
+async def _strategy_candidates(db: AsyncSession, strategy: dict) -> list[dict]:
+    """Challenger-Kandidaten: eigenes Scoring über das Universum.
+
+    Bewusst unabhängig von globalen Signalen/Screener — der Challenger
+    handelt SEINE Parameter, sonst wäre der Vergleich wertlos."""
+    from app.analysis.targets import compute_price_targets
+    from app.models import UniverseSymbol
+    from app.processing.indicators import compute_indicators
+    from app.sources.yahoo import load_ohlcv_df
+
+    threshold = float(strategy.get("threshold", 0.35))
+    horizon = int(strategy.get("horizon_days", 14))
+    profile = strategy_profile(strategy)
+    from app.analysis.scoring import technical_score
+
+    result = await db.execute(
+        select(UniverseSymbol.symbol).where(UniverseSymbol.active == True)  # noqa: E712
+    )
+    candidates: list[dict] = []
+    for (symbol,) in result.all():
+        df = await load_ohlcv_df(db, symbol, days=450)
+        if df.empty or len(df) < 60:
+            continue
+        snapshot = compute_indicators(df)["snapshot"]
+        score, _ = technical_score(snapshot, profile)
+        if score < threshold:
+            continue
+        targets = compute_price_targets(
+            snapshot, "BUY", horizon,
+            target_atr_factor=float(strategy.get("target_atr_factor", 2.0)),
+            stop_atr_factor=float(strategy.get("stop_atr_factor", 1.5)),
+        ) or {}
+        candidates.append({
+            "symbol": symbol, "signal_id": None, "horizon_days": horizon,
+            "rank": score, "origin": "strategy",
+            "target_price": targets.get("target_price"),
+            "stop_price": targets.get("stop_price"),
+        })
+    candidates.sort(key=lambda c: c["rank"], reverse=True)
+    return candidates
+
+
 async def _buy_candidates(db: AsyncSession, cfg: dict) -> list[dict]:
     """Kaufkandidaten: Watchlist-Signale (BUY), optional Screener-BUYs.
 
     Sortiert nach Confidence/Signalstärke — die stärksten zuerst."""
+    if cfg.get("strategy"):
+        return await _strategy_candidates(db, cfg["strategy"])
+
     since = utcnow() - timedelta(hours=_ENTRY_WINDOW_HOURS)
     result = await db.execute(
         select(Signal).where(
@@ -190,10 +281,11 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
         if quantity <= 0:
             continue
 
-        # Take-Profit/Stop aus dem Signal übernehmen; für Screener-Käufe
-        # frisch aus den aktuellen Indikatoren berechnen.
-        target_price = stop_price = None
-        if cand["signal_id"]:
+        # Take-Profit/Stop: vom Kandidaten (Strategie), aus dem Signal,
+        # oder frisch aus den aktuellen Indikatoren.
+        target_price = cand.get("target_price")
+        stop_price = cand.get("stop_price")
+        if target_price is None and cand["signal_id"]:
             sig = await db.get(Signal, cand["signal_id"])
             if sig:
                 target_price, stop_price = sig.target_price, sig.stop_price
@@ -235,7 +327,7 @@ async def run_auto_portfolios(db: AsyncSession) -> dict:
         if not cfg.get("enabled", True):
             continue
         try:
-            stats["closed"] += await _run_exits(db, pf)
+            stats["closed"] += await _run_exits(db, pf, cfg)
             stats["opened"] += await _run_entries(db, pf, cfg)
             await db.commit()
         except Exception:

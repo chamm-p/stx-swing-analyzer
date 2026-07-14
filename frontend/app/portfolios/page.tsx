@@ -131,6 +131,12 @@ export default function PortfoliosPage() {
                 {(KIND_BADGE[p.kind] || KIND_BADGE.real).label}
               </span>
             </div>
+            {p.config?.strategy && (
+              <div className="mt-1 text-xs text-sky-400/80"
+                title={Object.entries(p.config.strategy).map(([k, v]) => `${k}=${v}`).join(", ")}>
+                🧪 Challenger-Strategie (Schwelle {p.config.strategy.threshold}, eigenes Scoring)
+              </div>
+            )}
             {p.total_value !== undefined && (
               <div className="mt-2 text-sm">
                 <span className="font-semibold">{p.total_value.toLocaleString("de-DE", { maximumFractionDigits: 0 })}</span>

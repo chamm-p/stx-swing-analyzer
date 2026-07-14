@@ -76,6 +76,68 @@ async def run_detail(run_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     }
 
 
+class ApplyRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=100)
+
+
+@router.post("/backtest/runs/{run_id}/apply", status_code=201)
+async def apply_as_challenger(run_id: uuid.UUID, payload: ApplyRequest,
+                              db: AsyncSession = Depends(get_db)):
+    """Gewinner-Parameter als Challenger-Auto-Portfolio übernehmen.
+
+    Das Portfolio papertradet mit EIGENEM Scoring (Strategie-Modus des
+    Auto-Traders) parallel zum Champion. Bei Walk-Forward-Läufen wird
+    der am häufigsten gewählte Parametersatz übernommen. Beobachten ist
+    aus (kein LLM-/Watchlist-Flooding); Ablösung bleibt manuell."""
+    import ast
+
+    from app.analysis.auto_trader import STRATEGY_KEYS
+    from app.backtest.params import StrategyConfig
+    from app.models import Portfolio
+
+    run = await db.get(BacktestRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Lauf nicht gefunden")
+    if run.status != "done":
+        raise HTTPException(status_code=409, detail="Lauf ist nicht abgeschlossen")
+
+    stored = dict(run.params or {})
+    overrides = {k: v for k, v in stored.items() if isinstance(v, (int, float))}
+    if (run.metrics or {}).get("mode") == "walkforward":
+        wins = (run.metrics or {}).get("param_wins") or {}
+        if wins:
+            best = max(wins.items(), key=lambda kv: kv[1])[0]
+            try:
+                overrides.update(ast.literal_eval(best))
+            except (ValueError, SyntaxError):
+                pass
+
+    defaults = StrategyConfig().to_dict()
+    strategy = {k: overrides.get(k, defaults[k]) for k in STRATEGY_KEYS}
+    start_capital = float(overrides.get("start_capital", defaults["start_capital"]))
+    name = (payload.name or f"Challenger {run.label or str(run.id)[:8]}")[:100]
+
+    portfolio = Portfolio(
+        name=name, kind="auto",
+        platform_id=stored.get("platform_id"),
+        watch_enabled=False,
+        cash=start_capital,
+        config={
+            "start_capital": start_capital,
+            "max_per_trade": float(overrides.get("position_size", defaults["position_size"])),
+            "max_positions": int(overrides.get("max_positions", defaults["max_positions"])),
+            "min_confidence": 0.0,
+            "use_screener": False,
+            "enabled": True,
+            "strategy": strategy,
+            "source_run": str(run.id),
+        },
+    )
+    db.add(portfolio)
+    await db.commit()
+    return {"portfolio_id": portfolio.id, "name": name, "strategy": strategy}
+
+
 @router.delete("/backtest/runs/{run_id}")
 async def delete_run(run_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     run = await db.get(BacktestRun, run_id)

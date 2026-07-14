@@ -131,6 +131,17 @@ class TestAggregateSentiment:
         assert aggregate_sentiment([{"sentiment_score": 0.6}]) == 0.6
 
 
+class TestChallengerProfil:
+    def test_strategy_profile_mapping_und_defaults(self):
+        from app.analysis.auto_trader import strategy_profile
+        p = strategy_profile({"threshold": 0.4, "rsi_oversold": 25, "w_trend": 0.5})
+        assert p.rsi_oversold == 25.0
+        assert p.w_trend == 0.5
+        assert p.rsi_overbought == 70.0  # Default bleibt
+        assert p.macd_scale == 100.0
+        assert p.name == "challenger"
+
+
 class TestFlipSuppressed:
     def test_buy_bleibt_in_hysterese_zone(self):
         assert flip_suppressed("BUY", "HOLD", composite=0.30, threshold=0.35, hysteresis=0.10)
