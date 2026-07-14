@@ -66,10 +66,13 @@ async def list_runs(limit: int = 50, db: AsyncSession = Depends(get_db)):
 
 @router.get("/backtest/runs/{run_id}")
 async def run_detail(run_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    from app.backtest.runner import recommendation_from
+
     run = await db.get(BacktestRun, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Lauf nicht gefunden")
     return {
+        "recommendation": recommendation_from(run.metrics),
         **_summary(run),
         "metrics": run.metrics,
         "equity": run.equity or [],

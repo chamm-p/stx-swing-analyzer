@@ -58,8 +58,26 @@ async def _load_benchmark(db, bench_symbol: str, days: int):
     return df
 
 
-async def start_run(payload: dict) -> uuid.UUID:
-    """Legt den Lauf an und startet die Ausführung als Hintergrund-Task."""
+def recommendation_from(metrics: dict | None) -> dict | None:
+    """Empfohlener Parametersatz aus einem Walk-Forward-/Optimize-Lauf:
+    der am häufigsten gewählte Gewinner über alle Fenster."""
+    import ast
+
+    wins = (metrics or {}).get("param_wins") or {}
+    tested = (metrics or {}).get("windows_tested") or 0
+    if not wins or not tested:
+        return None
+    best_key, count = max(wins.items(), key=lambda kv: kv[1])
+    try:
+        params = ast.literal_eval(best_key)
+    except (ValueError, SyntaxError):
+        return None
+    return {"params": params, "wins": count, "windows_tested": tested,
+            "share": round(count / tested, 2)}
+
+
+async def start_run(payload: dict, background: bool = True) -> uuid.UUID:
+    """Legt den Lauf an und startet die Ausführung (default als Task)."""
     params = {k: v for k, v in (payload.get("params") or {}).items()
               if k in _PARAM_KEYS and v is not None}
     grid = {k: v for k, v in (payload.get("grid") or {}).items()
@@ -83,7 +101,10 @@ async def start_run(payload: dict) -> uuid.UUID:
         db.add(run)
         await db.commit()
         run_id = run.id
-    asyncio.create_task(_execute(run_id))
+    if background:
+        asyncio.create_task(_execute(run_id))
+    else:
+        await _execute(run_id)
     return run_id
 
 

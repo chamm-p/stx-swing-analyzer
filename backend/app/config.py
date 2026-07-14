@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     fetch_news_interval_min: int = 30
     analyze_interval_min: int = 120
     scan_interval_min: int = 360
+    # Quartals-Auto-Optimierung (Walk-Forward mit System-Grid, Ergebnis
+    # per Alert-Kanal; 0 = aus)
+    optimize_interval_days: int = 90
+    optimize_segments: str = "US,DAX,CRYPTO"
     signal_refresh_hours: int = 24
 
     # Scoring

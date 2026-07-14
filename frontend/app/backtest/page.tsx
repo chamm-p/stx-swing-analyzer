@@ -13,6 +13,7 @@ type RunSummary = {
 };
 
 type RunDetail = RunSummary & {
+  recommendation: { params: Record<string, any>; wins: number; windows_tested: number; share: number } | null;
   metrics: Record<string, any> | null;
   equity: { time: string; value: number }[];
   benchmark: { time: string; value: number }[];
@@ -285,6 +286,17 @@ export default function BacktestPage() {
             <Stat label="Trades / WinRate" value={`${detail.num_trades} / ${detail.win_rate != null ? Math.round(detail.win_rate * 100) + "%" : "—"}`} />
             <Stat label="Gebühren" value={String(detail.fees_total ?? 0)} />
           </div>
+          {detail.recommendation && (
+            <div className="mb-3 rounded border border-emerald-900/60 bg-emerald-950/20 px-3 py-2 text-sm">
+              🏆 <span className="font-semibold">Empfehlung:</span>{" "}
+              {Object.entries(detail.recommendation.params).map(([k, v]) => `${k}=${v}`).join(", ")}
+              <span className="ml-2 text-xs text-slate-400">
+                (gewählt in {detail.recommendation.wins}/{detail.recommendation.windows_tested} Fenstern
+                {detail.recommendation.share < 0.5 && " — geringe Stabilität, Vorsicht"})
+              </span>
+              <span className="ml-2 text-xs text-slate-500">→ „Als Challenger übernehmen" wendet genau diesen Satz an</span>
+            </div>
+          )}
           <EquityChart data={detail.equity} benchmark={detail.benchmark}
             benchmarkLabel={detail.metrics?.benchmark_symbol || "SPY"} />
           {(detail.metrics?.mode === "walkforward" || detail.metrics?.mode === "optimize") && detail.metrics?.windows && (

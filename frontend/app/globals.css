@@ -49,3 +49,5 @@ html[data-theme="light"] .bg-rose-600\/20 { background-color: #ffe4e6; }
 html[data-theme="light"] .bg-sky-600\/20 { background-color: #e0f2fe; }
 html[data-theme="light"] .bg-amber-950\/20 { background-color: #fef3c7; }
 html[data-theme="light"] .border-amber-900\/50 { border-color: #fcd34d; }
+html[data-theme="light"] .bg-emerald-950\/20 { background-color: #d1fae5; }
+html[data-theme="light"] .border-emerald-900\/60 { border-color: #6ee7b7; }
