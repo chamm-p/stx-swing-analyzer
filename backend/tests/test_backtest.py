@@ -228,6 +228,22 @@ class TestWalkForward:
             times = [p["time"] for p in wf["equity"]]
             assert times == sorted(times)
 
+    def test_flat_guard_verhindert_schlechte_fenster(self):
+        from app.backtest.walkforward import walk_forward
+        rng = np.random.default_rng(7)
+        closes = 100 * np.cumprod(1 + rng.normal(0.0004, 0.015, 700))
+        data = {"SYM": make_df(list(closes))}
+        base = {**CFG.to_dict()}
+        base.pop("fees", None)
+        # Unerreichbar hoher Guard → ALLE Fenster flat, keine Trades
+        wf = walk_forward(data, base, {"threshold": [0.3]},
+                          train_days=200, test_days=80, min_trades=0,
+                          min_train_score=99.0)
+        assert wf["oos"]["windows_flat"] == wf["oos"]["windows_total"]
+        assert wf["equity"] == []
+        for w in wf["windows"]:
+            assert "flat" in w
+
 
 class TestIntegrationEchtesScoring:
     def test_lauf_ohne_injektion_stabil(self):

@@ -52,7 +52,12 @@ def walk_forward(
     train_days: int = 365,
     test_days: int = 90,
     min_trades: int = 20,
+    min_train_score: float | None = 0.0,
 ) -> dict:
+    """min_train_score: Flat-Guard — liegt selbst der beste Grid-Kandidat
+    im Training unter dieser Score-Qualität, wird im Testfenster NICHT
+    gehandelt (Cash). „Der beste von lauter schlechten" ist kein Grund
+    zu handeln. None deaktiviert den Guard."""
     combos = build_grid(grid)
     all_dates = sorted(set().union(*[set(df.index) for df in data.values()]))
     if len(all_dates) < 250:
@@ -102,6 +107,15 @@ def walk_forward(
             continue
 
         train_score, chosen, train_metrics = best
+
+        # Flat-Guard: schlechte Gewinner werden nicht gehandelt
+        if min_train_score is not None and train_score < min_train_score:
+            window["flat"] = (f"bester Train-Score {round(train_score, 2)} "
+                              f"< {min_train_score} — Fenster in Cash")
+            window["train_score"] = round(train_score, 3)
+            windows.append(window)
+            cursor += pd.Timedelta(days=test_days)
+            continue
         # 2) Out-of-Sample: Gewinner ungesehen auf dem Testfenster
         test_result = run_backtest(data, cfg(chosen), currencies,
                                    trade_start=train_end, trade_end=test_end)
@@ -131,7 +145,8 @@ def walk_forward(
 
     # Aggregierte Out-of-Sample-Kennzahlen aus der verketteten Kurve
     oos: dict = {"windows_total": len(windows),
-                 "windows_tested": sum(1 for w in windows if "chosen_params" in w)}
+                 "windows_tested": sum(1 for w in windows if "chosen_params" in w),
+                 "windows_flat": sum(1 for w in windows if "flat" in w)}
     if combined:
         values = pd.Series([p["value"] for p in combined])
         oos["total_return_pct"] = round((float(values.iloc[-1]) / start_capital - 1) * 100, 2)

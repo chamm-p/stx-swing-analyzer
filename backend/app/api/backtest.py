@@ -22,12 +22,15 @@ class BacktestRequest(BaseModel):
     backfill: bool = False
     platform_id: int | None = None
     params: dict = Field(default_factory=dict)  # StrategyConfig-Overrides
-    # Walk-Forward
-    mode: str = Field(default="single", pattern="^(single|walkforward)$")
+    # Walk-Forward / Auto-Optimierung
+    mode: str = Field(default="single", pattern="^(single|walkforward|optimize)$")
     grid: dict = Field(default_factory=dict)  # {param: [werte…]}
     train_days: int = Field(default=365, ge=90, le=1825)
     test_days: int = Field(default=90, ge=30, le=365)
     min_trades: int = Field(default=20, ge=0, le=500)
+    # Flat-Guard: unter dieser Train-Qualität wird das Fenster nicht
+    # gehandelt (None = aus)
+    min_train_score: float | None = Field(default=0.0, ge=-10, le=10)
 
 
 @router.post("/backtest/run", status_code=202)

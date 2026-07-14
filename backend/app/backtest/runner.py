@@ -20,6 +20,20 @@ _PARAM_KEYS = set(StrategyConfig().to_dict().keys()) - {"fees"}
 
 MAX_EQUITY_POINTS = 500
 
+# Segmentrichtige Benchmarks — SPY für einen DAX-Test wäre unfair
+BENCHMARKS = {"US": "SPY", "DAX": "^GDAXI", "CRYPTO": "BTC-USD"}
+
+# Auto-Optimierung: das System erkundet den Parameterraum selbst
+AUTO_GRID = {
+    "threshold": [0.30, 0.35, 0.40, 0.45],
+    "target_atr_factor": [1.5, 2.0, 2.5],
+    "stop_atr_factor": [1.0, 1.5, 2.0],
+}  # 36 Kombinationen
+
+
+def benchmark_symbol(segment: str | None) -> str:
+    return BENCHMARKS.get(segment or "US", "SPY")
+
 
 def _downsample(series) -> list[dict]:
     step = max(len(series) // MAX_EQUITY_POINTS, 1)
@@ -28,6 +42,20 @@ def _downsample(series) -> list[dict]:
         points = pd.concat([points, series.iloc[[-1]]])
     return [{"time": ts.strftime("%Y-%m-%d"), "value": round(float(v), 2)}
             for ts, v in points.items()]
+
+
+
+async def _load_benchmark(db, bench_symbol: str, days: int):
+    """Benchmark-Kurse laden; fehlen sie (z.B. ^GDAXI), einmalig nachziehen."""
+    from app.sources.yahoo import backfill_ohlcv, load_ohlcv_df
+    df = await load_ohlcv_df(db, bench_symbol, days=days)
+    if df.empty:
+        try:
+            await backfill_ohlcv(db, bench_symbol, days)
+            df = await load_ohlcv_df(db, bench_symbol, days=days)
+        except Exception as e:
+            logger.warning("Benchmark %s nicht ladbar: %s", bench_symbol, e)
+    return df
 
 
 async def start_run(payload: dict) -> uuid.UUID:
@@ -49,7 +77,8 @@ async def start_run(payload: dict) -> uuid.UUID:
                     "grid": grid,
                     "train_days": int(payload.get("train_days") or 365),
                     "test_days": int(payload.get("test_days") or 90),
-                    "min_trades": int(payload.get("min_trades") or 20)},
+                    "min_trades": int(payload.get("min_trades") or 20),
+                    "min_train_score": payload.get("min_train_score", 0.0)},
         )
         db.add(run)
         await db.commit()
@@ -74,6 +103,7 @@ async def _execute(run_id: uuid.UUID) -> None:
             train_days = stored.pop("train_days", 365)
             test_days = stored.pop("test_days", 90)
             min_trades = stored.pop("min_trades", 20)
+            min_train_score = stored.pop("min_train_score", 0.0)
             overrides = {k: v for k, v in stored.items() if k in _PARAM_KEYS}
 
             q = select(UniverseSymbol).where(UniverseSymbol.active == True)  # noqa: E712
@@ -83,8 +113,9 @@ async def _execute(run_id: uuid.UUID) -> None:
             if not symbols:
                 raise RuntimeError("Keine Universum-Symbole für dieses Segment")
 
+            bench_symbol = benchmark_symbol(run.segment)
             if do_backfill:
-                for symbol in symbols + ["SPY"]:
+                for symbol in symbols + [bench_symbol]:
                     try:
                         await backfill_ohlcv(db, symbol, run.days)
                     except Exception as e:
@@ -106,8 +137,13 @@ async def _execute(run_id: uuid.UUID) -> None:
                 platform = await db.get(TradingPlatform, platform_id)
                 fees = platform.fees if platform else None
 
-            if mode == "walkforward":
+            if mode in ("walkforward", "optimize"):
                 from app.backtest.walkforward import walk_forward
+                if mode == "optimize":
+                    # Auto-Optimierung: System-Grid + universumsgerechter
+                    # Trade-Guard (kleine Universen erzeugen weniger Trades)
+                    grid = AUTO_GRID
+                    min_trades = min(min_trades, max(5, len(symbols) // 4))
                 base_params = StrategyConfig(**overrides).to_dict()
                 base_params.pop("fees", None)
                 wf = await asyncio.to_thread(
@@ -115,14 +151,15 @@ async def _execute(run_id: uuid.UUID) -> None:
                     currencies=currencies, fees=fees,
                     train_days=train_days, test_days=test_days,
                     min_trades=min_trades,
+                    min_train_score=min_train_score,
                 )
-                metrics = {**wf["oos"], "mode": "walkforward",
+                metrics = {**wf["oos"], "mode": mode,
                            "symbols_tested": len(data),
                            "windows": wf["windows"],
                            "param_wins": wf["param_wins"]}
-                # SPY-Benchmark über den Out-of-Sample-Zeitraum
+                # Segment-Benchmark über den Out-of-Sample-Zeitraum
                 if wf["equity"]:
-                    spy = await load_ohlcv_df(db, "SPY", days=run.days)
+                    spy = await _load_benchmark(db, bench_symbol, run.days)
                     if not spy.empty:
                         start_ts = pd.Timestamp(wf["equity"][0]["time"], tz="UTC")
                         end_ts = pd.Timestamp(wf["equity"][-1]["time"], tz="UTC")
@@ -133,6 +170,7 @@ async def _execute(run_id: uuid.UUID) -> None:
                             run.benchmark = _downsample(window / base * start_cap)
                             metrics["benchmark_return_pct"] = round(
                                 (float(window.iloc[-1]) / base - 1) * 100, 2)
+                            metrics["benchmark_symbol"] = bench_symbol
                 # WICHTIG: Zuweisung NACH allen Mutationen — der SPY-SELECT
                 # triggert einen Autoflush, spätere Dict-Mutationen würden
                 # das JSONB-Feld nicht erneut dirty markieren
@@ -152,9 +190,9 @@ async def _execute(run_id: uuid.UUID) -> None:
             metrics = compute_metrics(result)
             metrics["symbols_tested"] = len(data)
 
-            # Benchmark: SPY auf Startkapital normiert über denselben Zeitraum
+            # Benchmark: Segment-Index auf Startkapital normiert
             benchmark: list[dict] = []
-            spy = await load_ohlcv_df(db, "SPY", days=run.days)
+            spy = await _load_benchmark(db, bench_symbol, run.days)
             if not spy.empty and len(result.equity) > 1:
                 window = spy.loc[(spy.index >= result.equity.index[0]) &
                                  (spy.index <= result.equity.index[-1]), "close"]
@@ -164,6 +202,7 @@ async def _execute(run_id: uuid.UUID) -> None:
                     benchmark = _downsample(norm)
                     metrics["benchmark_return_pct"] = round(
                         (float(window.iloc[-1]) / base - 1) * 100, 2)
+                    metrics["benchmark_symbol"] = bench_symbol
 
             run.metrics = metrics
             run.equity = _downsample(result.equity) if len(result.equity) else []

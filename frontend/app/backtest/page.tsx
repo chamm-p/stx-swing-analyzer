@@ -43,7 +43,8 @@ export default function BacktestPage() {
   const [paramValues, setParamValues] = useState<Record<string, string>>(
     Object.fromEntries(PARAM_FIELDS.map((f) => [f.key, f.def]))
   );
-  const [mode, setMode] = useState<"single" | "walkforward">("single");
+  const [mode, setMode] = useState<"single" | "walkforward" | "optimize">("single");
+  const [minTrainScore, setMinTrainScore] = useState("0");
   const [gridValues, setGridValues] = useState<Record<string, string>>({
     threshold: "0.35, 0.40, 0.45",
     target_atr_factor: "",
@@ -82,6 +83,7 @@ export default function BacktestPage() {
         return;
       }
     }
+    const mts = parseFloat(minTrainScore.replace(",", "."));
     try {
       const res = await api.post("/api/backtest/run", {
         label: label.trim() || null,
@@ -95,6 +97,7 @@ export default function BacktestPage() {
         train_days: parseInt(trainDays),
         test_days: parseInt(testDays),
         min_trades: parseInt(minTrades),
+        min_train_score: isNaN(mts) ? null : mts,
       });
       setMsg(backfill
         ? "⏳ Lauf gestartet — Backfill der Historie kann einige Minuten dauern…"
@@ -199,8 +202,13 @@ export default function BacktestPage() {
               title="Kalibrieren auf Trainingsfenster, ungesehen bewerten auf Testfenster — nur Out-of-Sample zählt">
               Walk-Forward
             </button>
+            <button onClick={() => setMode("optimize")}
+              className={`px-3 py-1.5 ${mode === "optimize" ? "bg-emerald-600 text-white" : "text-slate-400"}`}
+              title="System erkundet den Parameterraum selbst (Schwelle × Ziel × Stop = 36 Kombinationen), Min-Trades passt sich der Universumsgröße an">
+              🤖 Auto-Optimierung
+            </button>
           </div>
-          {mode === "walkforward" && (
+          {(mode === "walkforward" || mode === "optimize") && (
             <>
               <Field label="Training / Test (Tage)">
                 <span className="flex gap-1">
@@ -211,7 +219,17 @@ export default function BacktestPage() {
               <Field label="Min. Trades (Guard)">
                 <input value={minTrades} onChange={(e) => setMinTrades(e.target.value)} className={inputCls + " w-16"} />
               </Field>
+              <Field label="Flat-Guard: min. Train-Score">
+                <input value={minTrainScore} onChange={(e) => setMinTrainScore(e.target.value)}
+                  title="Liegt selbst der beste Kandidat im Training unter diesem Score, wird das Fenster NICHT gehandelt (Cash). Leer = aus."
+                  className={inputCls + " w-16"} />
+              </Field>
             </>
+          )}
+          {mode === "optimize" && (
+            <span className="text-xs text-slate-500">
+              Grid automatisch: Schwelle 0.30–0.45 × Ziel 1.5–2.5 × Stop 1.0–2.0
+            </span>
           )}
         </div>
         {mode === "walkforward" && (
@@ -260,17 +278,20 @@ export default function BacktestPage() {
           <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
             <Stat label="Rendite" value={`${detail.total_return_pct}%`}
               tone={(detail.total_return_pct ?? 0) >= 0 ? "pos" : "neg"} />
-            <Stat label="Benchmark (SPY)" value={detail.benchmark_return_pct != null ? `${detail.benchmark_return_pct}%` : "—"} />
+            <Stat label={`Benchmark (${detail.metrics?.benchmark_symbol || "SPY"})`}
+              value={detail.benchmark_return_pct != null ? `${detail.benchmark_return_pct}%` : "—"} />
             <Stat label="Sharpe" value={String(detail.sharpe ?? "—")} />
             <Stat label="Max Drawdown" value={`${detail.max_drawdown_pct ?? "—"}%`} tone="neg" />
             <Stat label="Trades / WinRate" value={`${detail.num_trades} / ${detail.win_rate != null ? Math.round(detail.win_rate * 100) + "%" : "—"}`} />
             <Stat label="Gebühren" value={String(detail.fees_total ?? 0)} />
           </div>
-          <EquityChart data={detail.equity} benchmark={detail.benchmark} benchmarkLabel="SPY" />
-          {detail.metrics?.mode === "walkforward" && detail.metrics?.windows && (
+          <EquityChart data={detail.equity} benchmark={detail.benchmark}
+            benchmarkLabel={detail.metrics?.benchmark_symbol || "SPY"} />
+          {(detail.metrics?.mode === "walkforward" || detail.metrics?.mode === "optimize") && detail.metrics?.windows && (
             <div className="mt-3">
               <h3 className="mb-1 text-sm font-semibold">
-                Walk-Forward-Fenster ({detail.metrics.windows_tested}/{detail.metrics.windows_total} getestet
+                Walk-Forward-Fenster ({detail.metrics.windows_tested}/{detail.metrics.windows_total} gehandelt
+                {detail.metrics.windows_flat > 0 && `, ${detail.metrics.windows_flat} flat (Guard)`}
                 {detail.metrics.param_stability != null && `, Parameter-Stabilität ${Math.round(detail.metrics.param_stability * 100)}%`})
               </h3>
               <div className="overflow-x-auto">
@@ -284,6 +305,7 @@ export default function BacktestPage() {
                         <td className="py-0.5">{w.test[0]} → {w.test[1]}</td>
                         <td className="text-slate-400">
                           {w.skipped ? <span className="text-amber-400">{w.skipped}</span>
+                            : w.flat ? <span className="text-sky-400/80">💤 {w.flat}</span>
                             : Object.entries(w.chosen_params || {}).map(([k, v]) => `${k}=${v}`).join(", ") || "Basis"}
                         </td>
                         <td>{w.train_score ?? "—"}</td>
