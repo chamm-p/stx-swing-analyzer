@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, Signal } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
+import PriceDelta from "@/components/PriceDelta";
 
 type Dashboard = {
   watchlist_count: number;
@@ -51,6 +52,7 @@ export default function DashboardPage() {
                   <th className="px-3 py-2">Symbol</th>
                   <th className="px-3 py-2">Signal</th>
                   <th className="px-3 py-2">Kurs</th>
+                  <th className="px-3 py-2" title="Kursänderung — wechselt alle 4 s zwischen Vortag (1T) und 7 Tagen (7T)">Δ</th>
                   <th className="px-3 py-2">Ziel / Stop</th>
                   <th className="px-3 py-2">CRV</th>
                   <th className="px-3 py-2">Horizont</th>
@@ -67,6 +69,7 @@ export default function DashboardPage() {
                     </td>
                     <td className="px-3 py-2"><SignalBadge action={s.action} confidence={s.confidence} /></td>
                     <td className="px-3 py-2">{s.price_at_signal ?? "—"}</td>
+                    <td className="px-3 py-2"><PriceDelta d1={s.change_1d} d7={s.change_7d} /></td>
                     <td className="px-3 py-2 text-slate-400">
                       {s.target_price ? (
                         <>

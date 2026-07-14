@@ -6,6 +6,7 @@ import { api, runAnalysis } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
 import AnalysisLamp from "@/components/AnalysisLamp";
 import BuyDialog from "@/components/BuyDialog";
+import PriceDelta from "@/components/PriceDelta";
 
 type ScreenerRow = {
   symbol: string;
@@ -14,6 +15,8 @@ type ScreenerRow = {
   action: string;
   technical_score: number;
   close: number | null;
+  change_1d: number | null;
+  change_7d: number | null;
   snapshot: Record<string, any> | null;
   last_analysis_at: string | null;
 };
@@ -222,6 +225,7 @@ export default function TopSignalsPage() {
                 <SortHeader label="Tech-Score" k="score" sort={sort} onToggle={toggleSort} title="Signiert: bullish ↔ bearish" />
                 <SortHeader label="RSI" k="rsi" sort={sort} onToggle={toggleSort} />
                 <SortHeader label="Kurs" k="close" sort={sort} onToggle={toggleSort} />
+                <th className="px-3 py-2" title="Kursänderung — wechselt alle 4 s zwischen Vortag (1T) und 7 Tagen (7T)">Δ</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -243,6 +247,7 @@ export default function TopSignalsPage() {
                   </td>
                   <td className="px-3 py-2 text-slate-400">{r.snapshot?.rsi14?.toFixed(0) ?? "—"}</td>
                   <td className="px-3 py-2">{r.close ?? "—"}</td>
+                  <td className="px-3 py-2"><PriceDelta d1={r.change_1d} d7={r.change_7d} /></td>
                   <td className="px-3 py-2 text-right">
                     {rowStatus[r.symbol] ? (
                       <span className="mr-2 text-xs text-amber-400">{rowStatus[r.symbol]}</span>

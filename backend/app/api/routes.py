@@ -111,6 +111,10 @@ async def get_watchlist(db: AsyncSession = Depends(get_db)):
             "notes": None,
             "added_at": None,
         }))
+    # Kursänderung Vortag / 7 Tage (ein Batch-Query für alle Symbole).
+    _deltas = await yahoo.price_deltas(db, [e["symbol"] for e in out])
+    for e in out:
+        e.update(_deltas.get(e["symbol"], {"change_1d": None, "change_7d": None}))
     return out
 
 
@@ -567,8 +571,13 @@ async def dashboard(db: AsyncSession = Depends(get_db)):
         select(func.count()).select_from(NewsArticle)
         .where(NewsArticle.published_at >= datetime.now(timezone.utc) - timedelta(hours=24))
     )
+    sig_dicts = [_signal_dict(s) for s in signals.scalars().all()]
+    # Kursänderung Vortag / 7 Tage je Signal-Symbol (ein Batch-Query).
+    _deltas = await yahoo.price_deltas(db, [s["symbol"] for s in sig_dicts])
+    for s in sig_dicts:
+        s.update(_deltas.get(s["symbol"], {"change_1d": None, "change_7d": None}))
     return {
         "watchlist_count": watch_count,
         "news_last_24h": news_24h,
-        "recent_signals": [_signal_dict(s) for s in signals.scalars().all()],
+        "recent_signals": sig_dicts,
     }

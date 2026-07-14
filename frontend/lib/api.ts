@@ -60,6 +60,9 @@ export type Signal = {
   target_price: number | null;
   stop_price: number | null;
   risk_reward: number | null;
+  // Kursänderung Vortag / 7 Tage (vom Dashboard mitgeliefert).
+  change_1d?: number | null;
+  change_7d?: number | null;
   analyst_target: number | null;
   analyst_count: number | null;
 };

@@ -6,9 +6,12 @@ import { api, runAnalysis, WatchlistEntry } from "@/lib/api";
 import SignalBadge from "@/components/SignalBadge";
 import SymbolSearch from "@/components/SymbolSearch";
 import AnalysisLamp from "@/components/AnalysisLamp";
+import PriceDelta from "@/components/PriceDelta";
 
 type Entry = WatchlistEntry & {
   last_close: number | null;
+  change_1d: number | null;
+  change_7d: number | null;
   last_news_at: string | null;
   last_analysis_at: string | null;
 };
@@ -129,6 +132,7 @@ export default function WatchlistPage() {
                     <td className="px-3 py-2">
                       {item.last_close != null ? item.last_close.toFixed(2) : "—"}
                       {item.currency && <span className="ml-1 text-xs text-slate-500">{item.currency}</span>}
+                      <PriceDelta d1={item.change_1d} d7={item.change_7d} className="ml-2" />
                     </td>
                     <td className="px-3 py-2">
                       {s ? <SignalBadge action={s.action} confidence={s.confidence} /> : <span className="text-slate-500">—</span>}

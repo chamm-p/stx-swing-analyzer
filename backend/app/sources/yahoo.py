@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import yfinance as yf
-from sqlalchemy import func, select
+from sqlalchemy import func, select, desc
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -243,6 +243,53 @@ async def latest_close(db: AsyncSession, symbol: str) -> float | None:
         select(Ohlcv.close).where(Ohlcv.symbol == symbol).order_by(Ohlcv.ts.desc()).limit(1)
     )
     return result.scalar()
+
+
+async def price_deltas(db: AsyncSession, symbols: list[str]) -> dict[str, dict]:
+    """Prozentuale Kursänderung zum Vortag (change_1d) und zu ~7 Kalendertagen
+    (change_7d) je Symbol — aus den Tages-Bars (Ohlcv). Ein Batch-Query holt die
+    letzten 10 Bars je Symbol (deckt ~2 Wochen ab); Rest in Python.
+
+    Rückgabe: ``{SYM: {"change_1d": float|None, "change_7d": float|None}}``
+    (Prozent, signiert; None wenn nicht genug Historie)."""
+    syms = sorted({(s or "").upper() for s in symbols if s})
+    if not syms:
+        return {}
+    rn = func.row_number().over(
+        partition_by=Ohlcv.symbol, order_by=desc(Ohlcv.ts)
+    ).label("rn")
+    sub = select(Ohlcv.symbol, Ohlcv.ts, Ohlcv.close, rn).where(
+        Ohlcv.symbol.in_(syms)
+    ).subquery()
+    rows = (await db.execute(
+        select(sub.c.symbol, sub.c.ts, sub.c.close)
+        .where(sub.c.rn <= 10)
+        .order_by(sub.c.symbol, desc(sub.c.ts))
+    )).all()
+    by: dict[str, list] = {}
+    for sym, ts, close in rows:
+        by.setdefault(sym, []).append((ts, close))
+
+    out: dict[str, dict] = {}
+    for sym, bars in by.items():
+        # bars: ts-absteigend (neuester zuerst)
+        latest_ts, latest = bars[0]
+        d1 = None
+        if latest and len(bars) >= 2 and bars[1][1]:
+            d1 = (latest - bars[1][1]) / bars[1][1] * 100.0
+        d7 = None
+        older = bars[1:]
+        if latest and older:
+            target = latest_ts - timedelta(days=7)
+            # Bar, dessen ts am nächsten an „vor 7 Tagen" liegt.
+            t_ts, t_close = min(older, key=lambda b: abs((b[0] - target).total_seconds()))
+            if t_close:
+                d7 = (latest - t_close) / t_close * 100.0
+        out[sym] = {
+            "change_1d": round(d1, 2) if d1 is not None else None,
+            "change_7d": round(d7, 2) if d7 is not None else None,
+        }
+    return out
 
 
 async def ensure_asset(db: AsyncSession, symbol: str) -> Asset:

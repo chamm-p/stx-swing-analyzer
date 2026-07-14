@@ -50,6 +50,10 @@ async def top_signals(limit: int = 25, segment: str | None = None,
         )
         analysis_map = {sym: ts for sym, ts in res.all()}
 
+    # Kursänderung Vortag / 7 Tage je Symbol (aus Ohlcv, ein Batch-Query).
+    from app.sources import yahoo
+    deltas = await yahoo.price_deltas(db, [r.symbol for r, _, _ in rows])
+
     return {
         "run_at": last_run,
         "running": await screener.is_running(),
@@ -58,6 +62,7 @@ async def top_signals(limit: int = 25, segment: str | None = None,
             "action": r.action, "technical_score": r.technical_score,
             "close": r.close, "snapshot": r.snapshot,
             "last_analysis_at": analysis_map.get(r.symbol),
+            **deltas.get(r.symbol, {"change_1d": None, "change_7d": None}),
         } for r, name, segment in rows],
     }
 
