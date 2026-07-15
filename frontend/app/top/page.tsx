@@ -295,23 +295,26 @@ export default function TopSignalsPage() {
                     ) : "—"}
                   </td>
                   <td className="px-3 py-2"><PriceDelta d1={r.change_1d} d7={r.change_7d} /></td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
                     {rowStatus[r.symbol] ? (
                       <span className="mr-2 text-xs text-amber-400">{rowStatus[r.symbol]}</span>
                     ) : null}
-                    <button onClick={() => analyze(r.symbol)}
-                      className="mr-2 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-amber-500"
-                      title="Zur Watchlist + sofortige Voll-Analyse (Indikatoren, LLM, Scoring)">
-                      ⚡ Analyse
-                    </button>
-                    <button onClick={() => toWatchlist(r.symbol)}
-                      className="mr-2 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-sky-500">
-                      → Watchlist
-                    </button>
-                    <button onClick={() => toPortfolio(r)}
-                      className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-emerald-500">
-                      → Portfolio
-                    </button>
+                    {/* Feste Breite + zentriert — die drei Buttons fluchten über alle Zeilen */}
+                    <span className="inline-flex gap-1.5">
+                      <button onClick={() => analyze(r.symbol)}
+                        className="w-24 rounded border border-slate-700 px-2 py-1 text-center text-xs text-slate-300 hover:border-amber-500"
+                        title="Zur Watchlist + sofortige Voll-Analyse (Indikatoren, LLM, Scoring)">
+                        ⚡ Analyse
+                      </button>
+                      <button onClick={() => toWatchlist(r.symbol)}
+                        className="w-24 rounded border border-slate-700 px-2 py-1 text-center text-xs text-slate-300 hover:border-sky-500">
+                        → Watchlist
+                      </button>
+                      <button onClick={() => toPortfolio(r)}
+                        className="w-24 rounded border border-slate-700 px-2 py-1 text-center text-xs text-slate-300 hover:border-emerald-500">
+                        → Portfolio
+                      </button>
+                    </span>
                   </td>
                 </tr>
               ))}
