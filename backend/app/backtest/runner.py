@@ -21,7 +21,11 @@ _PARAM_KEYS = set(StrategyConfig().to_dict().keys()) - {"fees"}
 MAX_EQUITY_POINTS = 500
 
 # Segmentrichtige Benchmarks — SPY für einen DAX-Test wäre unfair
-BENCHMARKS = {"US": "SPY", "DAX": "^GDAXI", "CRYPTO": "BTC-USD"}
+BENCHMARKS = {
+    "US": "SPY", "DAX": "^GDAXI", "CRYPTO": "BTC-USD",
+    "NASDAQ100": "QQQ", "MDAX": "^MDAXI", "SDAX": "^SDAXI",
+    "EUROSTOXX": "^STOXX50E",
+}
 
 # Auto-Optimierung: das System erkundet den Parameterraum selbst
 AUTO_GRID = {
@@ -32,7 +36,9 @@ AUTO_GRID = {
 
 
 def benchmark_symbol(segment: str | None) -> str:
-    return BENCHMARKS.get(segment or "US", "SPY")
+    # Bei "+"-Gruppen (US+NASDAQ100) zählt das erste Segment
+    first = (segment or "US").split("+")[0]
+    return BENCHMARKS.get(first, "SPY")
 
 
 def _downsample(series) -> list[dict]:
@@ -59,12 +65,27 @@ async def _load_benchmark(db, bench_symbol: str, days: int):
 
 
 def recommendation_from(metrics: dict | None) -> dict | None:
-    """Empfohlener Parametersatz aus einem Walk-Forward-/Optimize-Lauf:
-    der am häufigsten gewählte Gewinner über alle Fenster."""
+    """Empfehlung aus einem Walk-Forward-/Optimize-Lauf.
+
+    Verdict "params": der am häufigsten gewählte Gewinner über alle Fenster.
+    Verdict "no_trade": OOS-Ergebnis negativ oder nichts handelbar — dann
+    wird bewusst KEIN Parametersatz gekrönt. Weiter auf denselben Daten zu
+    suchen, bis etwas grün aussieht, wäre Overfitting; Cash ist auch ein
+    Ergebnis."""
     import ast
 
-    wins = (metrics or {}).get("param_wins") or {}
-    tested = (metrics or {}).get("windows_tested") or 0
+    m = metrics or {}
+    wins = m.get("param_wins") or {}
+    tested = m.get("windows_tested") or 0
+    ret = m.get("total_return_pct")
+
+    if ret is not None and ret <= 0:
+        flat = m.get("windows_flat") or 0
+        return {"verdict": "no_trade",
+                "reason": (f"OOS-Rendite {ret}% — keine handelbare Konfiguration "
+                           f"gefunden ({flat} von {tested + flat} Fenstern blieben "
+                           f"bereits flat). Empfehlung: Segment nicht per "
+                           f"Auto-Trader handeln.")}
     if not wins or not tested:
         return None
     best_key, count = max(wins.items(), key=lambda kv: kv[1])
@@ -72,8 +93,8 @@ def recommendation_from(metrics: dict | None) -> dict | None:
         params = ast.literal_eval(best_key)
     except (ValueError, SyntaxError):
         return None
-    return {"params": params, "wins": count, "windows_tested": tested,
-            "share": round(count / tested, 2)}
+    return {"verdict": "params", "params": params, "wins": count,
+            "windows_tested": tested, "share": round(count / tested, 2)}
 
 
 async def start_run(payload: dict, background: bool = True) -> uuid.UUID:
@@ -142,7 +163,8 @@ async def _execute(run_id: uuid.UUID) -> None:
 
             q = select(UniverseSymbol).where(UniverseSymbol.active == True)  # noqa: E712
             if run.segment:
-                q = q.where(UniverseSymbol.segment == run.segment)
+                segments = [t for t in run.segment.upper().replace(" ", "+").split("+") if t]
+                q = q.where(UniverseSymbol.segment.in_(segments))
             symbols = [u.symbol for u in (await db.execute(q)).scalars().all()]
             if not symbols:
                 raise RuntimeError("Keine Universum-Symbole für dieses Segment")

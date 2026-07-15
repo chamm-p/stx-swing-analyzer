@@ -45,9 +45,19 @@ class Settings(BaseSettings):
     analyze_interval_min: int = 120
     scan_interval_min: int = 360
     # Quartals-Auto-Optimierung (Walk-Forward mit System-Grid, Ergebnis
-    # per Alert-Kanal; 0 = aus)
+    # per Alert-Kanal; 0 = aus). "+" gruppiert Segmente zu einem Lauf.
     optimize_interval_days: int = 90
-    optimize_segments: str = "US,DAX,CRYPTO"
+    optimize_segments: str = "US+NASDAQ100,DAX,CRYPTO"
+    # Index-Mitgliedschaften (S&P 500, Nasdaq 100, DAX/MDAX/SDAX, Euro
+    # Stoxx 50) via Wikipedia aktuell halten; 0 = aus
+    universe_refresh_days: int = 30
+    # Discovery: nächtlicher Breiten-Scan über komplette Börsenverzeichnisse
+    # (kleine/unbekannte Werte) — rein technisch, mit Liquiditäts-Vorfilter
+    discovery_enabled: bool = True
+    discovery_regions: str = "US,DE"
+    discovery_min_price: float = 2.0           # Mindestkurs (Penny-Stock-Filter)
+    discovery_min_turnover: float = 500_000.0  # Ø-Tagesumsatz Kurs×Volumen
+    discovery_top_n: int = 40                  # Top-Kandidaten je Region
     signal_refresh_hours: int = 24
 
     # Scoring

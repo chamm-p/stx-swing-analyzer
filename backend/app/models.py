@@ -195,6 +195,26 @@ class ScreenerResult(Base):
     snapshot: Mapped[dict | None] = mapped_column(JSONB)
 
 
+class DiscoveryResult(Base):
+    """Nächtlicher Breiten-Scan über komplette Börsenverzeichnisse
+    (US: NASDAQ+NYSE, DE: XETRA) — rein technisch. Kursdaten bleiben im
+    Speicher, nur die Top-Kandidaten landen in der DB."""
+    __tablename__ = "discovery_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    symbol: Mapped[str] = mapped_column(String(20), index=True)
+    name: Mapped[str | None] = mapped_column(String(200))
+    region: Mapped[str] = mapped_column(String(10))  # US | DE
+    action: Mapped[str] = mapped_column(String(10))
+    technical_score: Mapped[float] = mapped_column(Float)
+    close: Mapped[float | None] = mapped_column(Float)
+    change_1d: Mapped[float | None] = mapped_column(Float)
+    change_7d: Mapped[float | None] = mapped_column(Float)
+    avg_turnover: Mapped[float | None] = mapped_column(Float)  # Ø-Tagesumsatz Kurs×Volumen
+    snapshot: Mapped[dict | None] = mapped_column(JSONB)
+
+
 class CustomEvent(Base):
     """Manuell gepflegte Termine (Patentablauf, HV, Kapitalmarkttag, …) —
     fließen wie Earnings/Katalysatoren in LLM-Kontext und Signal-Warnungen."""

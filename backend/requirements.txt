@@ -14,5 +14,6 @@ apscheduler==3.11.3
 feedparser==6.0.12
 yfinance==1.5.1
 pandas==3.0.3
+lxml==6.0.2
 cryptography==49.0.0
 mcp==1.28.1

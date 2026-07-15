@@ -13,7 +13,11 @@ type RunSummary = {
 };
 
 type RunDetail = RunSummary & {
-  recommendation: { params: Record<string, any>; wins: number; windows_tested: number; share: number } | null;
+  recommendation: {
+    verdict: "params" | "no_trade";
+    params?: Record<string, any>; wins?: number; windows_tested?: number; share?: number;
+    reason?: string;
+  } | null;
   metrics: Record<string, any> | null;
   equity: { time: string; value: number }[];
   benchmark: { time: string; value: number }[];
@@ -36,7 +40,7 @@ export default function BacktestPage() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [platforms, setPlatforms] = useState<{ id: number; name: string }[]>([]);
-  const [segment, setSegment] = useState("US");
+  const [segment, setSegment] = useState("US+NASDAQ100");
   const [days, setDays] = useState("730");
   const [backfill, setBackfill] = useState(false);
   const [platformId, setPlatformId] = useState<number | "">("");
@@ -154,8 +158,12 @@ export default function BacktestPage() {
         <div className="flex flex-wrap gap-3">
           <Field label="Segment">
             <select value={segment} onChange={(e) => setSegment(e.target.value)} className={inputCls}>
-              <option value="US">US-Aktien</option>
+              <option value="US+NASDAQ100">US-Aktien (S&P 500 + Nasdaq 100)</option>
+              <option value="NASDAQ100">Nasdaq 100 (Tech)</option>
               <option value="DAX">DAX</option>
+              <option value="MDAX">MDAX</option>
+              <option value="SDAX">SDAX</option>
+              <option value="EUROSTOXX">Europa (Euro Stoxx 50)</option>
               <option value="CRYPTO">Cryptos</option>
               <option value="alle">Gesamtes Universum</option>
             </select>
@@ -286,13 +294,22 @@ export default function BacktestPage() {
             <Stat label="Trades / WinRate" value={`${detail.num_trades} / ${detail.win_rate != null ? Math.round(detail.win_rate * 100) + "%" : "—"}`} />
             <Stat label="Gebühren" value={String(detail.fees_total ?? 0)} />
           </div>
-          {detail.recommendation && (
+          {detail.recommendation?.verdict === "no_trade" && (
+            <div className="mb-3 rounded border border-rose-900/60 bg-rose-950/20 px-3 py-2 text-sm">
+              🛑 <span className="font-semibold">Keine Empfehlung:</span>{" "}
+              <span className="text-slate-300">{detail.recommendation.reason}</span>
+              <span className="ml-2 text-xs text-slate-500">
+                Weiter auf denselben Daten zu suchen, bis etwas grün aussieht, wäre Overfitting — Cash ist auch ein Ergebnis.
+              </span>
+            </div>
+          )}
+          {detail.recommendation?.verdict === "params" && (
             <div className="mb-3 rounded border border-emerald-900/60 bg-emerald-950/20 px-3 py-2 text-sm">
               🏆 <span className="font-semibold">Empfehlung:</span>{" "}
-              {Object.entries(detail.recommendation.params).map(([k, v]) => `${k}=${v}`).join(", ")}
+              {Object.entries(detail.recommendation.params ?? {}).map(([k, v]) => `${k}=${v}`).join(", ")}
               <span className="ml-2 text-xs text-slate-400">
                 (gewählt in {detail.recommendation.wins}/{detail.recommendation.windows_tested} Fenstern
-                {detail.recommendation.share < 0.5 && " — geringe Stabilität, Vorsicht"})
+                {(detail.recommendation.share ?? 1) < 0.5 && " — geringe Stabilität, Vorsicht"})
               </span>
               <span className="ml-2 text-xs text-slate-500">→ „Als Challenger übernehmen" wendet genau diesen Satz an</span>
             </div>

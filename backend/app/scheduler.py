@@ -103,38 +103,63 @@ async def job_auto_optimize() -> None:
         platform_id = platform.id if platform else None
 
     for segment in [x.strip().upper() for x in s.optimize_segments.split(",") if x.strip()]:
+        # Eskalationsleiter: erst normaler Flat-Guard, bei negativem OOS ein
+        # zweiter Lauf mit strengem Guard (handelt nur Fenster mit deutlich
+        # positivem Training). Bleibt es negativ, wird KEIN Parametersatz
+        # empfohlen — weiter zu suchen wäre Overfitting.
+        run = None
+        guard_used = 0.0
         try:
-            run_id = await start_run({
-                "label": f"Quartals-Optimierung {segment}",
-                "segment": segment, "days": days, "backfill": True,
-                "platform_id": platform_id, "mode": "optimize",
-                "train_days": 365, "test_days": 90,
-                "min_trades": 20, "min_train_score": 0.0, "params": {},
-            }, background=False)
+            for guard in (0.0, 0.5):
+                label = f"Quartals-Optimierung {segment}"
+                if guard > 0:
+                    label += f" (streng, Flat-Guard {guard})"
+                run_id = await start_run({
+                    "label": label,
+                    "segment": segment, "days": days, "backfill": True,
+                    "platform_id": platform_id, "mode": "optimize",
+                    "train_days": 365, "test_days": 90,
+                    "min_trades": 20, "min_train_score": guard, "params": {},
+                }, background=False)
+                async with SessionLocal() as db:
+                    run = await db.get(BacktestRun, run_id)
+                    db.expunge(run)
+                guard_used = guard
+                ret = (run.metrics or {}).get("total_return_pct")
+                if run.status != "done" or (ret is not None and ret > 0):
+                    break
         except Exception as e:
             logger.exception("Quartals-Optimierung %s fehlgeschlagen: %s", segment, e)
             continue
 
-        async with SessionLocal() as db:
-            run = await db.get(BacktestRun, run_id)
-            m = run.metrics or {}
-            reco = recommendation_from(m)
-            if run.status != "done":
-                text = f"⚠️ Quartals-Optimierung {segment} fehlgeschlagen: {run.error}"
-            else:
-                lines = [
-                    f"📊 Quartals-Optimierung {segment} abgeschlossen",
-                    f"OOS: {m.get('total_return_pct')}% vs {m.get('benchmark_symbol') or 'Benchmark'} "
-                    f"{m.get('benchmark_return_pct')}% | Sharpe {m.get('sharpe')}",
-                    f"Fenster: {m.get('windows_tested')} gehandelt, {m.get('windows_flat')} flat "
-                    f"| Stabilität {m.get('param_stability')}",
-                ]
-                if reco:
-                    params_text = ", ".join(f"{k}={v}" for k, v in reco["params"].items())
-                    lines.append(f"🏆 Empfehlung: {params_text} "
-                                 f"(gewählt in {reco['wins']}/{reco['windows_tested']} Fenstern)")
+        m = run.metrics or {}
+        reco = recommendation_from(m)
+        if run.status != "done":
+            text = f"⚠️ Quartals-Optimierung {segment} fehlgeschlagen: {run.error}"
+        else:
+            lines = [
+                f"📊 Quartals-Optimierung {segment} abgeschlossen",
+                f"OOS: {m.get('total_return_pct')}% vs {m.get('benchmark_symbol') or 'Benchmark'} "
+                f"{m.get('benchmark_return_pct')}% | Sharpe {m.get('sharpe')}",
+                f"Fenster: {m.get('windows_tested')} gehandelt, {m.get('windows_flat')} flat "
+                f"| Stabilität {m.get('param_stability')}",
+            ]
+            if reco and reco.get("verdict") == "no_trade":
+                lines.append(f"🛑 {reco['reason']}")
+                lines.append("(Auch der strenge zweite Lauf blieb negativ — "
+                             "kein Parametersatz wird empfohlen.)")
+            elif reco:
+                params_text = ", ".join(f"{k}={v}" for k, v in reco["params"].items())
+                if guard_used > 0:
+                    params_text += f", min_train_score={guard_used}"
+                lines.append(f"🏆 Empfehlung: {params_text} "
+                             f"(gewählt in {reco['wins']}/{reco['windows_tested']} Fenstern)")
+                if guard_used > 0:
+                    lines.append("⚠️ Nur mit strengem Flat-Guard profitabel — "
+                                 "Strategie handelt dann selten.")
                 lines.append("→ Approve als Challenger: Backtest-Seite")
-                text = "\n".join(lines)
+            text = "\n".join(lines)
+        async with SessionLocal() as db:
             comm = await load_settings(db, "comm")
         if comm.get("telegram_bot_token") and comm.get("telegram_chat_id"):
             try:
@@ -147,6 +172,34 @@ async def job_auto_optimize() -> None:
                                         f"[stx] Quartals-Optimierung {segment}", text)
             except Exception as e:
                 logger.error("Optimierungs-E-Mail fehlgeschlagen: %s", e)
+
+
+async def job_discovery() -> None:
+    """Nächtlicher Discovery-Scan über die kompletten Börsenverzeichnisse."""
+    from app.alerts.ops import track_failure, track_success
+    from app.analysis.discovery import run_discovery
+
+    async with SessionLocal() as db:
+        try:
+            count = await run_discovery(db)
+            await track_success("discovery")
+            logger.info("Discovery-Job fertig: %d Kandidaten", count)
+        except Exception as e:
+            logger.exception("Discovery-Scan fehlgeschlagen: %s", e)
+            await track_failure(db, "discovery", str(e), subject="Discovery-Scan")
+
+
+async def job_refresh_universe() -> None:
+    """Index-Mitgliedschaften (S&P 500, Nasdaq 100, DAX/MDAX/SDAX, Euro
+    Stoxx 50) aktuell halten — Indizes rotieren Mitglieder regelmäßig."""
+    from app.sources.indices import refresh_indices
+
+    async with SessionLocal() as db:
+        try:
+            result = await refresh_indices(db)
+            logger.info("Universum-Refresh: %s", result)
+        except Exception as e:
+            logger.exception("Universum-Refresh fehlgeschlagen: %s", e)
 
 
 async def job_paper_trading() -> None:
@@ -184,4 +237,16 @@ def build_scheduler() -> AsyncIOScheduler:
         scheduler.add_job(job_auto_optimize, "interval",
                           days=s.optimize_interval_days,
                           id="auto_optimize", max_instances=1, coalesce=True)
+    if s.discovery_enabled:
+        # Nachts, wenn US-Schlusskurse final sind und nichts anderes läuft
+        scheduler.add_job(job_discovery, "cron", hour=2, minute=30,
+                          id="discovery", max_instances=1, coalesce=True)
+    if s.universe_refresh_days > 0:
+        from datetime import datetime, timedelta, timezone
+        scheduler.add_job(job_refresh_universe, "interval",
+                          days=s.universe_refresh_days,
+                          # kurz nach dem Start einmal laufen, damit die
+                          # Index-Segmente nicht erst in 30 Tagen entstehen
+                          next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
+                          id="refresh_universe", max_instances=1, coalesce=True)
     return scheduler

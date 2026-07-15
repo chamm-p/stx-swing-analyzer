@@ -22,7 +22,8 @@ async def top_signals(limit: int = 25, segment: str | None = None,
                       db: AsyncSession = Depends(get_db)):
     """Bestenliste des letzten Scans, sortiert nach Signalstärke.
 
-    Optional nach Segment gefiltert (z.B. CRYPTO, DAX, US)."""
+    Optional nach Segment gefiltert; "+" gruppiert (z.B. US+NASDAQ100 =
+    alle US-Aktien, da Nasdaq-100-Mitglieder Vorrang vorm S&P-Label haben)."""
     last_run = await db.scalar(select(func.max(ScreenerResult.run_at)))
     rows = []
     if last_run is not None:
@@ -34,7 +35,9 @@ async def top_signals(limit: int = 25, segment: str | None = None,
             .limit(min(limit, 100))
         )
         if segment:
-            q = q.where(UniverseSymbol.segment == segment.upper())
+            # "+" dekodiert in Query-Strings zu Leerzeichen — beides akzeptieren
+            segments = [t for t in segment.upper().replace(" ", "+").split("+") if t]
+            q = q.where(UniverseSymbol.segment.in_(segments))
         result = await db.execute(q)
         rows = result.all()
 
@@ -83,7 +86,84 @@ async def trigger_scan():
     return {"started": True}
 
 
+# ---------------------------------------------------------------- Discovery
+
+@router.get("/discovery/top")
+async def discovery_top(limit: int = 100, region: str | None = None,
+                        db: AsyncSession = Depends(get_db)):
+    """Top-Kandidaten des letzten Discovery-Scans (Breiten-Scan über die
+    kompletten Börsenverzeichnisse, rein technisch)."""
+    from app.analysis import discovery
+    from app.models import AnalysisResult, DiscoveryResult
+
+    last_run = await db.scalar(select(func.max(DiscoveryResult.run_at)))
+    rows: list[DiscoveryResult] = []
+    if last_run is not None:
+        q = (
+            select(DiscoveryResult)
+            .where(DiscoveryResult.run_at == last_run)
+            .order_by(desc(func.abs(DiscoveryResult.technical_score)))
+            .limit(min(limit, 200))
+        )
+        if region:
+            q = q.where(DiscoveryResult.region == region.upper())
+        rows = (await db.execute(q)).scalars().all()
+
+    analysis_map: dict = {}
+    if rows:
+        res = await db.execute(
+            select(AnalysisResult.symbol, func.max(AnalysisResult.ts))
+            .where(AnalysisResult.kind == "asset_review",
+                   AnalysisResult.symbol.in_([r.symbol for r in rows]))
+            .group_by(AnalysisResult.symbol)
+        )
+        analysis_map = {sym: ts for sym, ts in res.all()}
+
+    return {
+        "run_at": last_run,
+        "running": await discovery.is_running(),
+        "results": [{
+            "symbol": r.symbol, "name": r.name, "segment": r.region,
+            "action": r.action, "technical_score": r.technical_score,
+            "close": r.close, "snapshot": r.snapshot,
+            "change_1d": r.change_1d, "change_7d": r.change_7d,
+            "avg_turnover": r.avg_turnover,
+            "last_analysis_at": analysis_map.get(r.symbol),
+        } for r in rows],
+    }
+
+
+async def _run_discovery_bg() -> None:
+    from app.analysis import discovery
+    async with SessionLocal() as db:
+        try:
+            await discovery.run_discovery(db)
+        except Exception as e:
+            logger.exception("Manueller Discovery-Scan fehlgeschlagen: %s", e)
+
+
+@router.post("/discovery/run", status_code=202)
+async def trigger_discovery():
+    from app.analysis import discovery
+    if await discovery.is_running():
+        raise HTTPException(status_code=409, detail="Discovery-Scan läuft bereits")
+    asyncio.create_task(_run_discovery_bg())
+    return {"started": True}
+
+
 # ---------------------------------------------------------------- Universum
+
+@router.post("/universe/refresh")
+async def refresh_universe(db: AsyncSession = Depends(get_db)):
+    """Index-Mitgliedschaften (S&P 500, Nasdaq 100, DAX/MDAX/SDAX, Euro
+    Stoxx 50) aus Wikipedia synchronisieren."""
+    from app.sources.indices import refresh_indices
+    try:
+        return await refresh_indices(db)
+    except Exception as e:
+        logger.exception("Index-Refresh fehlgeschlagen: %s", e)
+        raise HTTPException(status_code=502, detail=f"Index-Refresh fehlgeschlagen: {e}")
+
 
 class UniverseAdd(BaseModel):
     symbol: str = Field(min_length=1, max_length=20)

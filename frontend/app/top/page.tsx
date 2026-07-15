@@ -25,12 +25,17 @@ type TopResponse = { run_at: string | null; running: boolean; results: ScreenerR
 
 type PortfolioOption = { id: number; name: string; kind: string };
 
-const SEGMENTS = [
+const SEGMENTS: { key: string | null; label: string; title?: string }[] = [
   { key: null, label: "Alle" },
-  { key: "US", label: "US-Aktien" },
+  { key: "US+NASDAQ100", label: "US-Aktien", title: "S&P 500 + Nasdaq 100 (Large Caps)" },
+  { key: "NASDAQ100", label: "Nasdaq 100", title: "Tech & Wachstum" },
   { key: "DAX", label: "DAX" },
+  { key: "MDAX", label: "MDAX", title: "Deutsche Mid Caps" },
+  { key: "SDAX", label: "SDAX", title: "Deutsche Small Caps" },
+  { key: "EUROSTOXX", label: "Europa", title: "Euro Stoxx 50 (ohne deutsche Werte — die stehen unter DAX)" },
   { key: "CRYPTO", label: "Top Cryptos" },
-] as const;
+  { key: "DISCOVERY", label: "🔭 Discovery", title: "Nächtlicher Breiten-Scan über die kompletten Börsenverzeichnisse (US: NASDAQ+NYSE, DE: XETRA) — fängt Small Caps und Unbekanntes ein" },
+];
 
 type SortKey = "strength" | "symbol" | "segment" | "action" | "score" | "rsi" | "close";
 
@@ -57,14 +62,19 @@ export default function TopSignalsPage() {
   const [buySymbol, setBuySymbol] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const topUrl = useCallback(() => (
+    segment === "DISCOVERY"
+      ? "/api/discovery/top?limit=100"
+      : `/api/screener/top?limit=30${segment ? `&segment=${encodeURIComponent(segment)}` : ""}`
+  ), [segment]);
+
   const load = useCallback(() => {
-    const seg = segment ? `&segment=${segment}` : "";
-    api.get(`/api/screener/top?limit=30${seg}`).then(setData).catch((e) => setError(e.message));
+    api.get(topUrl()).then(setData).catch((e) => setError(e.message));
     api.get("/api/portfolios").then((p: PortfolioOption[]) => {
       setPortfolios(p);
       if (p.length > 0) setTargetPortfolio((cur) => cur ?? p[0].id);
     }).catch(() => {});
-  }, [segment]);
+  }, [topUrl]);
   useEffect(load, [load]);
 
   const sorted = useMemo(() => {
@@ -86,14 +96,17 @@ export default function TopSignalsPage() {
 
   async function runScan() {
     setMsg(null);
+    const discovery = segment === "DISCOVERY";
     try {
-      await api.post("/api/screener/run");
-      setMsg("⏳ Scan läuft — Universum wird abgerufen und bewertet…");
+      await api.post(discovery ? "/api/discovery/run" : "/api/screener/run");
+      setMsg(discovery
+        ? "⏳ Discovery-Scan läuft — komplette US- + XETRA-Verzeichnisse (~8000 Werte), dauert 30–60 Min…"
+        : "⏳ Scan läuft — Universum wird abgerufen und bewertet…");
       // Status pollen und Liste automatisch aktualisieren, sobald fertig
-      const seg = segment ? `&segment=${segment}` : "";
-      for (let i = 0; i < 120; i++) {
-        await new Promise((r) => setTimeout(r, 5000));
-        const d = await api.get(`/api/screener/top?limit=30${seg}`);
+      const pollMs = discovery ? 20000 : 5000;
+      for (let i = 0; i < 180; i++) {
+        await new Promise((r) => setTimeout(r, pollMs));
+        const d = await api.get(topUrl());
         if (!d.running) {
           setData(d);
           setMsg(`✅ Scan abgeschlossen (${new Date(d.run_at).toLocaleTimeString("de-DE")}).`);
@@ -101,6 +114,20 @@ export default function TopSignalsPage() {
         }
       }
       setMsg("Scan läuft ungewöhnlich lange — Seite später neu laden.");
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  async function refreshIndices() {
+    setMsg("⏳ Index-Mitgliedschaften werden von Wikipedia geladen…");
+    try {
+      const r = await api.post("/api/universe/refresh");
+      const errs = Object.entries(r.indices ?? {})
+        .filter(([, v]: any) => v.error).map(([k]) => k);
+      setMsg(`✅ Indizes aktualisiert: ${r.added} neu, ${r.updated} umgruppiert, ${r.removed} entfernt.` +
+        (errs.length ? ` ⚠️ Fehlgeschlagen: ${errs.join(", ")}` : ""));
+      load();
     } catch (e: any) {
       setMsg(e.message);
     }
@@ -149,10 +176,17 @@ export default function TopSignalsPage() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-bold">Top-Signale</h1>
         <span className="text-xs text-slate-500">
-          Universum-Screener (rein technisch, unabhängig von Watchlist & Portfolio)
+          {segment === "DISCOVERY"
+            ? "Breiten-Scan über komplette Börsenverzeichnisse (US + XETRA) — nächtlich, rein technisch, liquiditätsgefiltert"
+            : "Universum-Screener (rein technisch, unabhängig von Watchlist & Portfolio)"}
         </span>
+        <button onClick={refreshIndices}
+          title="S&P 500, Nasdaq 100, DAX/MDAX/SDAX, Euro Stoxx 50 von Wikipedia synchronisieren (läuft sonst monatlich automatisch)"
+          className="ml-auto rounded border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-sky-500">
+          🔄 Indizes
+        </button>
         <button onClick={runScan}
-          className="ml-auto rounded bg-sky-600 px-3 py-1.5 text-sm font-semibold hover:bg-sky-500">
+          className="rounded bg-sky-600 px-3 py-1.5 text-sm font-semibold hover:bg-sky-500">
           Scan starten
         </button>
       </div>
@@ -162,6 +196,7 @@ export default function TopSignalsPage() {
           <button
             key={s.label}
             onClick={() => setSegment(s.key)}
+            title={s.title}
             className={`rounded-full border px-3 py-1 text-xs font-semibold ${
               segment === s.key
                 ? "border-sky-500 bg-sky-600/20 text-sky-300"
@@ -211,7 +246,9 @@ export default function TopSignalsPage() {
         <p className="text-slate-500">Lade…</p>
       ) : data.results.length === 0 ? (
         <p className="text-slate-500">
-          Noch kein Scan vorhanden — „Scan starten" klicken (der Worker scannt sonst automatisch alle 6h).
+          {segment === "DISCOVERY"
+            ? "Noch kein Discovery-Lauf vorhanden — „Scan starten" klicken (läuft sonst automatisch jede Nacht um 02:30 UTC)."
+            : "Noch kein Scan vorhanden — „Scan starten" klicken (der Worker scannt sonst automatisch alle 6h)."}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-slate-800">
