@@ -70,6 +70,13 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "client_id": ("reddit_client_id", False),
         "client_secret": ("reddit_client_secret", True),
     },
+    # Steuerprofil (eCH-0196-Steuerauszug)
+    "tax": {
+        "first_name": ("tax_first_name", False),
+        "last_name": ("tax_last_name", False),
+        "canton": ("tax_canton", False),
+        "tin": ("tax_tin", False),
+    },
     # IBKR-API-Zugang (Gateway-Socket; Zugangsdaten liegen beim Gateway)
     "ibkr": {
         "host": ("ibkr_host", False),

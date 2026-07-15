@@ -41,6 +41,29 @@ def _fetch_info_sync(symbol: str) -> dict:
         return {}
 
 
+def _fetch_isin_sync(symbol: str) -> str | None:
+    try:
+        isin = yf.Ticker(symbol).isin
+        # yfinance liefert "-" wenn unbekannt
+        return isin if isin and isin not in ("-", "") else None
+    except Exception:
+        return None
+
+
+async def fetch_isin(symbol: str) -> str | None:
+    """ISIN zu einem Symbol (Yahoo), 30 Tage in Redis gecacht (ändert sich nie)."""
+    from app.services_redis import get_redis
+
+    r = get_redis()
+    key = f"isin:{symbol.upper()}"
+    cached = await r.get(key)
+    if cached is not None:
+        return cached or None  # "" = negativ gecacht
+    isin = await asyncio.to_thread(_fetch_isin_sync, symbol)
+    await r.set(key, isin or "", ex=30 * 24 * 3600)
+    return isin
+
+
 async def fetch_asset_info(symbol: str) -> dict:
     """Stammdaten (Name, Währung, Börse, Typ) für die Asset-Anlage."""
     info = await asyncio.to_thread(_fetch_info_sync, symbol)

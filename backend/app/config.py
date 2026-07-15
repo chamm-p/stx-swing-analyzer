@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     reddit_client_id: str = ""
     reddit_client_secret: str = ""
 
+    # Steuerprofil für den eCH-0196-Steuerauszug (Schweiz)
+    tax_first_name: str = ""
+    tax_last_name: str = ""
+    tax_canton: str = "ZH"
+    tax_tin: str = ""  # AHV-Nr. (optional)
+
     # MCP-Server: statisches Zugriffs-Token für /api/mcp (leer = deaktiviert)
     mcp_token: str = ""
 

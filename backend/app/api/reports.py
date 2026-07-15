@@ -12,7 +12,7 @@ die liefert der IBKR-/Broker-Jahresauszug.
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,9 +30,9 @@ async def _close_at(db: AsyncSession, symbol: str, at: datetime) -> float | None
         .order_by(desc(Ohlcv.ts)).limit(1))
 
 
-@router.get("/reports/tax/{year}")
-async def tax_report(year: int, portfolio_id: int | None = None,
-                     db: AsyncSession = Depends(get_db)):
+async def collect_tax_data(db: AsyncSession, year: int,
+                           portfolio_id: int | None = None) -> dict:
+    """Kern: realisierte Trades + Bestand per 31.12. je echtem Depot."""
     if not 2000 <= year <= 2100:
         raise HTTPException(status_code=422, detail="Ungültiges Jahr")
     start = datetime(year, 1, 1, tzinfo=timezone.utc)
@@ -47,13 +47,12 @@ async def tax_report(year: int, portfolio_id: int | None = None,
     if not portfolios:
         raise HTTPException(status_code=404, detail="Kein (echtes) Portfolio gefunden")
 
-    currencies: dict[str, str | None] = {}
+    assets: dict[str, Asset | None] = {}
 
-    async def currency(symbol: str) -> str | None:
-        if symbol not in currencies:
-            asset = await db.get(Asset, symbol)
-            currencies[symbol] = asset.currency if asset else None
-        return currencies[symbol]
+    async def asset_of(symbol: str) -> Asset | None:
+        if symbol not in assets:
+            assets[symbol] = await db.get(Asset, symbol)
+        return assets[symbol]
 
     trades, holdings = [], []
     total_pnl = total_fees = 0.0
@@ -61,6 +60,7 @@ async def tax_report(year: int, portfolio_id: int | None = None,
         positions = (await db.execute(
             select(Position).where(Position.portfolio_id == pf.id))).scalars().all()
         for p in positions:
+            a = await asset_of(p.symbol)
             # --- realisierte Trades im Steuerjahr ---
             if p.exit_date is not None and start <= p.exit_date <= end:
                 proceeds = round(p.quantity * (p.exit_price or 0), 2)
@@ -71,7 +71,7 @@ async def tax_report(year: int, portfolio_id: int | None = None,
                 total_fees += fees
                 trades.append({
                     "portfolio": pf.name, "symbol": p.symbol,
-                    "currency": await currency(p.symbol),
+                    "currency": a.currency if a else None,
                     "quantity": p.quantity,
                     "entry_date": p.entry_date.date().isoformat() if p.entry_date else None,
                     "entry_price": p.entry_price,
@@ -85,7 +85,9 @@ async def tax_report(year: int, portfolio_id: int | None = None,
                 close = await _close_at(db, p.symbol, end)
                 holdings.append({
                     "portfolio": pf.name, "symbol": p.symbol,
-                    "currency": await currency(p.symbol),
+                    "name": a.name if a else None,
+                    "asset_type": a.asset_type if a else "stock",
+                    "currency": a.currency if a else None,
                     "quantity": p.quantity,
                     "entry_price": p.entry_price,
                     "year_end_close": close,
@@ -112,3 +114,55 @@ async def tax_report(year: int, portfolio_id: int | None = None,
             "(Broker-Jahresauszug beiziehen).",
         ],
     }
+
+
+@router.get("/reports/tax/{year}")
+async def tax_report(year: int, portfolio_id: int | None = None,
+                     db: AsyncSession = Depends(get_db)):
+    return await collect_tax_data(db, year, portfolio_id)
+
+
+async def _enrich_chf(db: AsyncSession, data: dict) -> tuple[dict, str | None]:
+    """Bestand um ISIN, Jahresend-FX-Kurs und CHF-Wert ergänzen.
+    Liefert (data, fx_source)."""
+    from app.sources.fx import year_end_rate
+    from app.sources.yahoo import fetch_isin
+
+    year = data["year"]
+    rate_cache: dict[str, dict] = {}
+    fx_source = None
+
+    async def rate_for(currency: str | None) -> dict:
+        cur = (currency or "CHF").upper()
+        if cur not in rate_cache:
+            rate_cache[cur] = await year_end_rate(year, cur)
+        return rate_cache[cur]
+
+    for h in data["holdings"]:
+        h["isin"] = await fetch_isin(h["symbol"])
+        fx = await rate_for(h.get("currency"))
+        h["fx_rate"] = fx.get("rate")
+        if fx.get("source") and fx["source"] != "CHF":
+            fx_source = fx["source"]
+        if h.get("year_end_value") is not None and fx.get("rate") is not None:
+            h["chf_value"] = round(h["year_end_value"] * fx["rate"], 2)
+        else:
+            h["chf_value"] = None
+    return data, fx_source
+
+
+@router.get("/reports/tax/{year}/ech0196.xml")
+async def tax_report_ech0196(year: int, portfolio_id: int | None = None,
+                             db: AsyncSession = Depends(get_db)):
+    """eCH-0196-Steuerauszug (XML) für den Import in die kantonale
+    Steuersoftware. Unzertifiziert, ohne Dividenden/Verrechnungssteuer."""
+    from app.reports.ech0196 import generate_ech0196
+    from app.services_settings import load_settings
+
+    data = await collect_tax_data(db, year, portfolio_id)
+    data, _ = await _enrich_chf(db, data)
+    taxpayer = await load_settings(db, "tax")
+    xml = generate_ech0196(data, taxpayer)
+    filename = f"eCH-0196-Steuerauszug-{year}.xml"
+    return Response(content=xml, media_type="application/xml", headers={
+        "Content-Disposition": f'attachment; filename="{filename}"'})

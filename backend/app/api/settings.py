@@ -65,6 +65,24 @@ async def put_comm(payload: CommSettings, db: AsyncSession = Depends(get_db)):
     return await public_view(db, "comm")
 
 
+class TaxSettings(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    canton: str | None = None
+    tin: str | None = None
+
+
+@router.get("/settings/tax")
+async def get_tax(db: AsyncSession = Depends(get_db)):
+    return await load_settings(db, "tax")
+
+
+@router.put("/settings/tax")
+async def put_tax(payload: TaxSettings, db: AsyncSession = Depends(get_db)):
+    await save_settings(db, "tax", payload.model_dump(exclude_none=True))
+    return await load_settings(db, "tax")
+
+
 class RedditSettings(BaseModel):
     client_id: str | None = None
     client_secret: str | None = None  # leer = Bestand behalten

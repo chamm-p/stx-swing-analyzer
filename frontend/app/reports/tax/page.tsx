@@ -32,10 +32,15 @@ function download(filename: string, content: string) {
   a.click();
 }
 
+type TaxProfile = { first_name: string; last_name: string; canton: string; tin: string };
+
 export default function TaxReportPage() {
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear - 1);
   const [report, setReport] = useState<Report | null>(null);
+  const [profile, setProfile] = useState<TaxProfile | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback((y: number) => {
@@ -46,6 +51,18 @@ export default function TaxReportPage() {
     });
   }, []);
   useEffect(() => load(year), [year, load]);
+  useEffect(() => { api.get("/api/settings/tax").then(setProfile).catch(() => {}); }, []);
+
+  async function saveProfile() {
+    if (!profile) return;
+    setProfileMsg(null);
+    try {
+      setProfile(await api.put("/api/settings/tax", profile));
+      setProfileMsg("✅ Gespeichert.");
+    } catch (e: any) {
+      setProfileMsg(e.message);
+    }
+  }
 
   const fmt = (v: number | null | undefined) =>
     v == null ? "—" : v.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -74,9 +91,43 @@ export default function TaxReportPage() {
               className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-300 hover:border-sky-500">
               ⬇ Bestand CSV
             </button>
+            <a href={`/api/reports/tax/${year}/ech0196.xml`} download
+              title="eCH-0196-Steuerauszug (XML) für den Import in die kantonale Steuersoftware. Unzertifiziert, ohne Dividenden."
+              className="rounded border border-emerald-700/60 px-3 py-1 text-sm text-emerald-400 hover:border-emerald-500">
+              📄 eCH-0196 (eTax) XML
+            </a>
+            <button onClick={() => setShowProfile(!showProfile)}
+              className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-300 hover:border-sky-500">
+              👤 Steuerprofil
+            </button>
           </>
         )}
       </div>
+
+      {showProfile && profile && (
+        <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 print:hidden">
+          <p className="mb-2 text-xs text-slate-500">
+            Angaben für den eCH-0196-Auszug (Name & Kanton stehen im XML-Kopf).
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            {([["first_name", "Vorname", "w-32"], ["last_name", "Nachname", "w-32"],
+               ["canton", "Kanton", "w-16"], ["tin", "AHV-Nr. (optional)", "w-40"]] as const).map(
+              ([key, label, w]) => (
+                <label key={key} className="text-xs text-slate-400">
+                  {label}
+                  <input value={(profile as any)[key] ?? ""}
+                    onChange={(e) => setProfile({ ...profile, [key]: e.target.value })}
+                    className={`mt-0.5 block ${w} rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200`} />
+                </label>
+              ))}
+            <button onClick={saveProfile}
+              className="rounded bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500">
+              Speichern
+            </button>
+            {profileMsg && <span className="text-xs text-amber-400">{profileMsg}</span>}
+          </div>
+        </div>
+      )}
 
       {error && <p className="text-rose-400">{error}</p>}
       {!report && !error && <p className="text-slate-500">Lade…</p>}
