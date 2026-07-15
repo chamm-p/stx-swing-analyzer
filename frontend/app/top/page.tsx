@@ -60,6 +60,7 @@ export default function TopSignalsPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [rowStatus, setRowStatus] = useState<Record<string, string>>({});
   const [buySymbol, setBuySymbol] = useState<string | null>(null);
+  const [buyTargets, setBuyTargets] = useState<{ target?: number | null; stop?: number | null }>({});
   const [error, setError] = useState<string | null>(null);
 
   const topUrl = useCallback(() => (
@@ -166,6 +167,7 @@ export default function TopSignalsPage() {
       setMsg("Zuerst ein Portfolio anlegen (Seite „Portfolios“).");
       return;
     }
+    setBuyTargets({ target: row.snapshot?.target_price, stop: row.snapshot?.stop_price });
     setBuySymbol(row.symbol);
   }
 
@@ -229,6 +231,8 @@ export default function TopSignalsPage() {
         <BuyDialog
           symbol={buySymbol}
           defaultPortfolioId={targetPortfolio}
+          targetPrice={buyTargets.target}
+          stopPrice={buyTargets.stop}
           onClose={() => setBuySymbol(null)}
           onBought={(m) => setMsg(m)}
         />

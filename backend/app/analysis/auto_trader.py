@@ -22,6 +22,7 @@ from datetime import timedelta
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analysis.position_sizing import crv, portfolio_market_value, risk_based_quantity
 from app.models import Portfolio, Position, ScreenerResult, Signal, utcnow
 from app.sources.yahoo import ensure_asset, latest_close
 
@@ -256,6 +257,9 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
     if slots <= 0:
         return 0
 
+    # Basis für die 1%-Regel: aktueller Gesamtwert (Cash + Positionen)
+    total_value = await portfolio_market_value(db, pf, open_pos)
+
     opened = 0
     for cand in await _buy_candidates(db, cfg):
         if slots <= 0 or pf.cash < cfg["max_per_trade"] * 0.5:
@@ -274,18 +278,9 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
         except Exception as e:
             logger.warning("Asset-Stammdaten für %s nicht ladbar: %s", symbol, e)
 
-        from app.analysis.fees import portfolio_fee
-        budget = min(cfg["max_per_trade"], pf.cash)
-        # per-Share-Gebühren brauchen die Stückzahl — Näherung übers volle
-        # Budget (überschätzt die Gebühr minimal, sprengt nie das Cash)
-        fee = await portfolio_fee(db, pf, asset.currency if asset else None,
-                                  budget, quantity=budget / price)
-        quantity = round(max(budget - fee, 0) / price, 6)
-        if quantity <= 0:
-            continue
-
-        # Take-Profit/Stop: vom Kandidaten (Strategie), aus dem Signal,
-        # oder frisch aus den aktuellen Indikatoren.
+        # Take-Profit/Stop VOR der Größenbestimmung: vom Kandidaten
+        # (Strategie), aus dem Signal, oder frisch aus den Indikatoren —
+        # die 1%-Regel und der CRV-Guard brauchen den Stop.
         target_price = cand.get("target_price")
         stop_price = cand.get("stop_price")
         if target_price is None and cand["signal_id"]:
@@ -303,6 +298,29 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
                 if targets:
                     target_price = targets["target_price"]
                     stop_price = targets["stop_price"]
+
+        # Goldene Regel: kein Kauf mit magerem Chance-Risiko-Verhältnis
+        cand_crv = crv(price, target_price, stop_price)
+        if cand_crv is not None and cand_crv < cfg["min_crv"]:
+            logger.info("Auto-Portfolio %s: %s übersprungen (CRV %.2f < %.2f)",
+                        pf.name, symbol, cand_crv, cfg["min_crv"])
+            continue
+
+        from app.analysis.fees import portfolio_fee
+        budget = min(cfg["max_per_trade"], pf.cash)
+        est_quantity = budget / price
+        # 1%-Regel: Stückzahl so deckeln, dass ein Ausstoppen höchstens
+        # risk_pct% des Portfoliowerts kostet
+        risk_qty = risk_based_quantity(total_value, price, stop_price, cfg["risk_pct"])
+        if risk_qty is not None:
+            est_quantity = min(est_quantity, risk_qty)
+        # per-Share-Gebühren brauchen die Stückzahl — Näherung über die
+        # ungekürzte Menge (überschätzt minimal, sprengt nie das Cash)
+        fee = await portfolio_fee(db, pf, asset.currency if asset else None,
+                                  est_quantity * price, quantity=est_quantity)
+        quantity = round(max(min(est_quantity, (budget - fee) / price), 0), 6)
+        if quantity <= 0:
+            continue
 
         db.add(Position(
             portfolio_id=pf.id, symbol=symbol, quantity=quantity,
@@ -323,10 +341,15 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
 
 async def run_auto_portfolios(db: AsyncSession) -> dict:
     """Führt Exits + Entries für alle aktiven Auto-Portfolios aus."""
+    from app.config import get_settings
+
+    s = get_settings()
     result = await db.execute(select(Portfolio).where(Portfolio.kind == "auto"))
     stats = {"closed": 0, "opened": 0}
     for pf in result.scalars().all():
-        cfg = {**DEFAULT_CONFIG, **(pf.config or {})}
+        cfg = {**DEFAULT_CONFIG,
+               "risk_pct": s.risk_per_trade_pct, "min_crv": s.swing_min_crv,
+               **(pf.config or {})}
         if not cfg.get("enabled", True):
             continue
         try:

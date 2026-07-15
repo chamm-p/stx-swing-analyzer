@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 type PortfolioOpt = {
   id: number; name: string; kind: string;
   platform_id: number | null; platform_name: string | null;
-  cash?: number; start_capital?: number;
+  cash?: number; start_capital?: number; total_value?: number;
 };
 type Tier = {
   up_to: number | null; fee?: number; pct?: number; per_share?: number;
@@ -54,6 +54,7 @@ export default function BuyDialog({ symbol, defaultPortfolioId, targetPrice, sto
   const [priceInput, setPriceInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [routeIbkr, setRouteIbkr] = useState(false);
+  const [riskPct, setRiskPct] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -63,6 +64,7 @@ export default function BuyDialog({ symbol, defaultPortfolioId, targetPrice, sto
       setPortfolioId((cur) => cur ?? (p.length > 0 ? p[0].id : null));
     }).catch(() => {});
     api.get("/api/platforms").then(setPlatforms).catch(() => {});
+    api.get("/api/trading-rules").then((r) => setRiskPct(r.risk_per_trade_pct)).catch(() => {});
   }, [symbol]);
 
   const portfolio = portfolios.find((p) => p.id === portfolioId);
@@ -81,6 +83,18 @@ export default function BuyDialog({ symbol, defaultPortfolioId, targetPrice, sto
   const fee = previewFee(platform, quote?.currency ?? null, volume, quantity);
   const total = volume + fee;
   const cashAfter = portfolio?.cash !== undefined ? portfolio.cash - total : undefined;
+
+  // 1%-Regel: Stückzahl, bei der ein Ausstoppen höchstens riskPct% des
+  // Portfoliowerts kostet — nur mit bekanntem Stop unterhalb des Kurses.
+  const riskQty = useMemo(() => {
+    const base = portfolio?.total_value ?? portfolio?.cash;
+    if (!riskPct || !base || !price || !stopPrice || stopPrice >= price) return null;
+    const raw = (base * riskPct / 100) / (price - stopPrice);
+    const capped = portfolio?.cash !== undefined
+      ? Math.min(raw, Math.max(portfolio.cash, 0) / price) : raw;
+    return capped >= 1 ? Math.floor(capped) : Math.floor(capped * 10000) / 10000;
+  }, [riskPct, portfolio, price, stopPrice]);
+  const overRisk = riskQty !== null && quantity > riskQty * 1.001;
 
   const ibkrPlatform = !!platform?.name?.toUpperCase().startsWith("IBKR");
 
@@ -193,6 +207,21 @@ export default function BuyDialog({ symbol, defaultPortfolioId, targetPrice, sto
               <div className="mt-1 text-slate-500">
                 Signal-Zielzone: <span className="text-emerald-400">{targetPrice?.toFixed(2) ?? "—"}</span>
                 {" / "}<span className="text-rose-400">{stopPrice?.toFixed(2) ?? "—"}</span>
+              </div>
+            )}
+            {riskQty !== null && (
+              <div className={`mt-1 flex items-center justify-between ${overRisk ? "text-rose-400" : "text-slate-500"}`}
+                title={`1%-Regel: Ein Ausstoppen am Stop ${stopPrice?.toFixed(2)} soll höchstens ${riskPct}% des Portfoliowerts kosten`}>
+                <span>📐 1%-Regel: max. <b className="text-slate-300">{riskQty}</b> Stück{overRisk && " — aktuell überschritten ⚠️"}</span>
+                <button onClick={() => { setMode("qty"); setQtyInput(String(riskQty)); }}
+                  className="rounded border border-slate-700 px-2 py-0.5 text-[10px] text-slate-300 hover:border-sky-500">
+                  übernehmen
+                </button>
+              </div>
+            )}
+            {riskQty === null && !stopPrice && (
+              <div className="mt-1 text-slate-600" title="Ohne Stop kein Risiko-Vorschlag — erst analysieren, dann kaufen">
+                📐 1%-Regel: kein Stop bekannt → kein Größenvorschlag
               </div>
             )}
           </div>

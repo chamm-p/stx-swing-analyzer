@@ -169,6 +169,16 @@ async def remove_from_watchlist(symbol: str, db: AsyncSession = Depends(get_db))
     return {"ok": True}
 
 
+@router.get("/trading-rules")
+async def trading_rules():
+    """Goldene Swing-Regeln fürs UI (Positionsgrößen-Vorschlag im Kauf-Dialog)."""
+    from app.config import get_settings
+
+    s = get_settings()
+    return {"risk_per_trade_pct": s.risk_per_trade_pct,
+            "swing_min_crv": s.swing_min_crv}
+
+
 # ---------------------------------------------------------------- Signale
 
 def _signal_dict(s: Signal) -> dict:

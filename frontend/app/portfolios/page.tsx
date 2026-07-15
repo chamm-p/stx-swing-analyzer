@@ -27,7 +27,7 @@ export default function PortfoliosPage() {
   const [kind, setKind] = useState<"real" | "trial" | "auto">("real");
   const [platforms, setPlatforms] = useState<{ id: number; name: string }[]>([]);
   const [platformId, setPlatformId] = useState<number | "">("");
-  const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", use_screener: true });
+  const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", risk_pct: "1", min_crv: "1.5", use_screener: true });
   const [startCapital, setStartCapital] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -109,6 +109,8 @@ export default function PortfoliosPage() {
             <CfgInput label="Max. pro Trade" value={cfg.max_per_trade} onChange={(v) => setCfg({ ...cfg, max_per_trade: v })} />
             <CfgInput label="Max. Positionen" value={cfg.max_positions} onChange={(v) => setCfg({ ...cfg, max_positions: v })} />
             <CfgInput label="Min. Confidence" value={cfg.min_confidence} onChange={(v) => setCfg({ ...cfg, min_confidence: v })} />
+            <CfgInput label="Risiko %/Trade (1%-Regel)" value={cfg.risk_pct} onChange={(v) => setCfg({ ...cfg, risk_pct: v })} />
+            <CfgInput label="Min. CRV" value={cfg.min_crv} onChange={(v) => setCfg({ ...cfg, min_crv: v })} />
             <label className="flex items-center gap-1 text-xs text-slate-400">
               <input type="checkbox" checked={cfg.use_screener}
                 onChange={(e) => setCfg({ ...cfg, use_screener: e.target.checked })} />

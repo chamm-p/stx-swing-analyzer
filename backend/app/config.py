@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # Schwelle fällt (Einstieg: >= Schwelle, Ausstieg: < Schwelle - Hysterese)
     signal_hysteresis: float = 0.10
 
+    # Goldene Swing-Regeln
+    risk_per_trade_pct: float = 1.0  # 1%-Regel: max. Verlust je Trade bis Stop
+    swing_min_crv: float = 1.5       # Mindest-CRV für automatische Käufe
+
     # Retention
     retention_ohlcv_days: int = 730
     retention_news_days: int = 365

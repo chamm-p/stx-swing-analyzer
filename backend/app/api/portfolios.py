@@ -23,6 +23,9 @@ class AutoConfig(BaseModel):
     max_per_trade: float = Field(default=1000.0, gt=0)
     max_positions: int = Field(default=10, ge=1, le=50)
     min_confidence: float = Field(default=0.5, ge=0, le=1)
+    # Goldene Swing-Regeln (Default aus der globalen Config)
+    risk_pct: float = Field(default=1.0, gt=0, le=10)   # 1%-Regel
+    min_crv: float = Field(default=1.5, ge=0, le=10)    # Mindest-CRV
     use_screener: bool = True
     enabled: bool = True
 
