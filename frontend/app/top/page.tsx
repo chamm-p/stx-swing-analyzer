@@ -247,8 +247,8 @@ export default function TopSignalsPage() {
       ) : data.results.length === 0 ? (
         <p className="text-slate-500">
           {segment === "DISCOVERY"
-            ? "Noch kein Discovery-Lauf vorhanden — „Scan starten" klicken (läuft sonst automatisch jede Nacht um 02:30 UTC)."
-            : "Noch kein Scan vorhanden — „Scan starten" klicken (der Worker scannt sonst automatisch alle 6h)."}
+            ? "Noch kein Discovery-Lauf vorhanden — „Scan starten“ klicken (läuft sonst automatisch jede Nacht um 02:30 UTC)."
+            : "Noch kein Scan vorhanden — „Scan starten“ klicken (der Worker scannt sonst automatisch alle 6h)."}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-slate-800">
