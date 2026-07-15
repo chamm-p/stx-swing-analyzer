@@ -327,7 +327,7 @@ async def add_position(portfolio_id: int, payload: PositionCreate,
     from app.analysis.fees import portfolio_fee
     asset = await db.get(Asset, symbol)
     fee = await portfolio_fee(db, portfolio, asset.currency if asset else None,
-                              payload.quantity * entry_price)
+                              payload.quantity * entry_price, quantity=payload.quantity)
 
     position = Position(
         portfolio_id=portfolio_id, symbol=symbol, quantity=payload.quantity,
@@ -367,7 +367,7 @@ async def close_position(position_id: uuid.UUID, payload: PositionClose,
     asset = await db.get(Asset, position.symbol)
     sold_quantity = sell_qty if partial else position.quantity
     fee_sell = await portfolio_fee(db, portfolio, asset.currency if asset else None,
-                                   exit_price * sold_quantity)
+                                   exit_price * sold_quantity, quantity=sold_quantity)
 
     if partial:
         # Kaufgebühr anteilig auf den verkauften Teil umlegen

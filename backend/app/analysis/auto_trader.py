@@ -117,7 +117,7 @@ async def _run_exits(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
             continue
         asset = await db.get(Asset, p.symbol)
         fee = await portfolio_fee(db, pf, asset.currency if asset else None,
-                                  price * p.quantity)
+                                  price * p.quantity, quantity=p.quantity)
 
         if p.stop_price and price <= p.stop_price:
             _do_close(pf, p, price, f"Stop-Loss ({p.stop_price}) erreicht", fee)
@@ -276,7 +276,10 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
 
         from app.analysis.fees import portfolio_fee
         budget = min(cfg["max_per_trade"], pf.cash)
-        fee = await portfolio_fee(db, pf, asset.currency if asset else None, budget)
+        # per-Share-Gebühren brauchen die Stückzahl — Näherung übers volle
+        # Budget (überschätzt die Gebühr minimal, sprengt nie das Cash)
+        fee = await portfolio_fee(db, pf, asset.currency if asset else None,
+                                  budget, quantity=budget / price)
         quantity = round(max(budget - fee, 0) / price, 6)
         if quantity <= 0:
             continue

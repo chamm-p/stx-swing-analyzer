@@ -129,12 +129,12 @@ def run_backtest(
     equity_values: list[float] = []
     last_close: dict[str, float] = {}
 
-    def fee_for(symbol: str, volume: float) -> float:
-        return compute_fee(config.fees, currencies.get(symbol), volume)
+    def fee_for(symbol: str, volume: float, quantity: float | None = None) -> float:
+        return compute_fee(config.fees, currencies.get(symbol), volume, quantity)
 
     def close_trade(trade: Trade, date: pd.Timestamp, price: float, reason: str) -> None:
         nonlocal cash
-        fee = fee_for(trade.symbol, price * trade.quantity)
+        fee = fee_for(trade.symbol, price * trade.quantity, trade.quantity)
         trade.exit_date = date
         trade.exit_price = price
         trade.fee_sell = fee
@@ -166,7 +166,7 @@ def run_backtest(
             if price <= 0 or price != price:
                 continue
             budget = min(config.position_size, cash)
-            fee = fee_for(symbol, budget)
+            fee = fee_for(symbol, budget, budget / price)
             quantity = round(max(budget - fee, 0) / price, 6)
             if quantity <= 0:
                 continue

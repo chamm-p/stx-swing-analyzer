@@ -8,17 +8,30 @@ type PortfolioOpt = {
   platform_id: number | null; platform_name: string | null;
   cash?: number; start_capital?: number;
 };
-type Platform = { id: number; name: string; fees: Record<string, { up_to: number | null; fee: number }[]> };
+type Tier = {
+  up_to: number | null; fee?: number; pct?: number; per_share?: number;
+  min?: number; max?: number; max_pct?: number;
+};
+type Platform = { id: number; name: string; fees: Record<string, Tier[]> };
 
 /** Gebühren-Vorschau (Client-Spiegel der Server-Staffel — der Server
- *  bucht beim Kauf autoritativ). */
-function previewFee(platform: Platform | undefined, currency: string | null, volume: number): number {
+ *  bucht beim Kauf autoritativ). Kennt Flat, Prozent und pro Aktie. */
+function previewFee(platform: Platform | undefined, currency: string | null,
+                    volume: number, quantity = 0): number {
   if (!platform || volume <= 0) return 0;
   const tiers = platform.fees[currency || ""] || platform.fees["default"] || [];
   const ordered = [...tiers].sort((a, b) =>
     (a.up_to === null ? 1 : 0) - (b.up_to === null ? 1 : 0) || (a.up_to ?? 0) - (b.up_to ?? 0));
   for (const t of ordered) {
-    if (t.up_to === null || volume <= t.up_to) return t.fee;
+    if (t.up_to === null || volume <= t.up_to) {
+      let base = t.pct != null ? t.pct * volume
+        : t.per_share != null ? t.per_share * quantity
+        : (t.fee ?? 0);
+      if (t.min != null) base = Math.max(base, t.min);
+      if (t.max != null) base = Math.min(base, t.max);
+      if (t.max_pct != null) base = Math.min(base, t.max_pct * volume);
+      return Math.round(base * 100) / 100;
+    }
   }
   return 0;
 }
@@ -40,6 +53,7 @@ export default function BuyDialog({ symbol, defaultPortfolioId, targetPrice, sto
   const [budgetInput, setBudgetInput] = useState("1000");
   const [priceInput, setPriceInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [routeIbkr, setRouteIbkr] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -59,27 +73,47 @@ export default function BuyDialog({ symbol, defaultPortfolioId, targetPrice, sto
     if (mode === "qty") return parseFloat(qtyInput.replace(",", ".")) || 0;
     const budget = parseFloat(budgetInput.replace(",", ".")) || 0;
     if (!price) return 0;
-    const fee = previewFee(platform, quote?.currency ?? null, budget);
+    const fee = previewFee(platform, quote?.currency ?? null, budget, budget / price);
     return Math.max(Math.floor(((budget - fee) / price) * 10000) / 10000, 0);
   }, [mode, qtyInput, budgetInput, price, platform, quote]);
 
   const volume = quantity * price;
-  const fee = previewFee(platform, quote?.currency ?? null, volume);
+  const fee = previewFee(platform, quote?.currency ?? null, volume, quantity);
   const total = volume + fee;
   const cashAfter = portfolio?.cash !== undefined ? portfolio.cash - total : undefined;
+
+  const ibkrPlatform = !!platform?.name?.toUpperCase().startsWith("IBKR");
 
   async function buy() {
     if (!portfolioId || quantity <= 0) return;
     setBusy(true);
     setError(null);
     try {
+      let entryPrice: number | null = priceInput.trim() ? price : null;
+      let ibkrNote = "";
+      if (routeIbkr) {
+        // Echte Order zuerst — nur bei Erfolg wird die Position gebucht.
+        const order = await api.post("/api/broker/ibkr/order", {
+          symbol, side: "BUY", quantity,
+          order_type: "MKT",
+          take_profit: targetPrice ?? null,
+          stop_loss: stopPrice ?? null,
+          currency: quote?.currency ?? null,
+          confirm: true,
+        });
+        if (order.avg_fill_price) entryPrice = order.avg_fill_price;
+        ibkrNote = ` · IBKR ${order.status}` +
+          (order.avg_fill_price ? ` @ ${order.avg_fill_price}` : "") +
+          (order.commission ? `, Kommission ${order.commission}` : "") +
+          (order.bracket_orders ? `, ${order.bracket_orders} Bracket-Exits` : "");
+      }
       const res = await api.post(`/api/portfolios/${portfolioId}/positions`, {
         symbol,
         quantity,
-        entry_price: priceInput.trim() ? price : null,
+        entry_price: entryPrice,
       });
       onBought(`✅ ${quantity} × ${symbol} gekauft zu ${res.entry_price}` +
-        (res.fee ? ` (+ ${res.fee} Gebühr)` : "") + ` → ${portfolio?.name}`);
+        (res.fee ? ` (+ ${res.fee} Gebühr)` : "") + ` → ${portfolio?.name}` + ibkrNote);
       onClose();
     } catch (e: any) {
       setError(e.message);
@@ -163,6 +197,16 @@ export default function BuyDialog({ symbol, defaultPortfolioId, targetPrice, sto
             )}
           </div>
 
+          {ibkrPlatform && (
+            <label className="flex items-center gap-2 rounded border border-amber-900/60 bg-amber-950/20 p-2 text-xs"
+              title="Platziert eine echte Market-Order über das IB Gateway; Ziel/Stop aus dem Signal gehen als Bracket-Exits mit. Erfordert „Orders erlauben“ in den IBKR-Einstellungen.">
+              <input type="checkbox" checked={routeIbkr} onChange={(e) => setRouteIbkr(e.target.checked)} />
+              <span className={routeIbkr ? "font-semibold text-amber-400" : "text-slate-400"}>
+                🏦 Echte Order an IBKR senden (Market{(targetPrice || stopPrice) ? " + Bracket Ziel/Stop" : ""})
+              </span>
+            </label>
+          )}
+
           {error && <p className="text-xs text-rose-400">{error}</p>}
 
           <div className="flex justify-end gap-2">
@@ -170,8 +214,8 @@ export default function BuyDialog({ symbol, defaultPortfolioId, targetPrice, sto
               Abbrechen
             </button>
             <button onClick={buy} disabled={busy || quantity <= 0 || !portfolioId}
-              className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
-              {busy ? "Kaufe…" : "Kaufen"}
+              className={`rounded px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50 ${routeIbkr ? "bg-amber-600 hover:bg-amber-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
+              {busy ? "Kaufe…" : routeIbkr ? "Order an IBKR senden" : "Kaufen"}
             </button>
           </div>
         </div>

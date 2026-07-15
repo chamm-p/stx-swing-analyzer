@@ -65,6 +65,14 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "telegram_chat_id": ("telegram_chat_id", False),
         "telegram_bot_token": ("telegram_bot_token", True),
     },
+    # IBKR-API-Zugang (Gateway-Socket; Zugangsdaten liegen beim Gateway)
+    "ibkr": {
+        "host": ("ibkr_host", False),
+        "port": ("ibkr_port", False),
+        "client_id": ("ibkr_client_id", False),
+        "account": ("ibkr_account", False),
+        "trading_enabled": ("ibkr_trading_enabled", False),
+    },
     # Job-Intervalle — der Worker-Tick gleicht laufend mit dem APScheduler
     # ab (Änderungen greifen ohne Neustart, ≤ 20s)
     "scheduler": {

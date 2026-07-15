@@ -77,6 +77,14 @@ class Settings(BaseSettings):
     retention_ohlcv_days: int = 730
     retention_news_days: int = 365
 
+    # IBKR: die App spricht nur den API-Socket des ib-gateway-Containers
+    # an (Docker-intern); IBKR-Zugangsdaten liegen als Env beim Gateway.
+    ibkr_host: str = "ib-gateway"
+    ibkr_port: int = 4004          # 4004 = Paper, 4003 = Live
+    ibkr_client_id: int = 17
+    ibkr_account: str = ""         # leer = Default-Konto der Session
+    ibkr_trading_enabled: bool = False  # Orders nur nach explizitem Opt-in
+
     # MCP-Server: statisches Zugriffs-Token für /api/mcp (leer = deaktiviert)
     mcp_token: str = ""
 

@@ -66,6 +66,23 @@ services:
     # Täglicher pg_dump, 14 Tage Aufbewahrung
     entrypoint: ["sh", "-c", "while true; do if pg_dump -h db -U ${POSTGRES_USER:-stx} -d ${POSTGRES_DB:-stx} -F c -f /backups/stx-$$(date +%F).dump; then echo \"Backup OK: stx-$$(date +%F).dump\"; else echo 'Backup FEHLGESCHLAGEN'; fi; find /backups -name 'stx-*.dump' -mtime +14 -delete; sleep 86400; done"]
 
+  # IBKR-Gateway (optional): startet nur mit COMPOSE_PROFILES=ibkr in der
+  # .env. Haelt die IBKR-Session (Auto-Login via IBC); die App verbindet
+  # sich Docker-intern mit dem API-Socket (4004 Paper / 4003 Live) —
+  # bewusst KEINE ports nach aussen.
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    restart: unless-stopped
+    profiles: ["ibkr"]
+    environment:
+      TWS_USERID: ${IBKR_USERID:-}
+      TWS_PASSWORD: ${IBKR_PASSWORD:-}
+      TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
+      READ_ONLY_API: ${IBKR_READ_ONLY_API:-no}
+      TWOFA_TIMEOUT_ACTION: restart
+      AUTO_RESTART_TIME: 11:59 PM
+      TIME_ZONE: Europe/Zurich
+
   frontend:
     build: ./frontend
     restart: unless-stopped

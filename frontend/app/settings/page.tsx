@@ -38,6 +38,7 @@ export default function SettingsPage() {
       {llm && <LlmSection initial={llm} onSaved={load} />}
       {comm && <CommSection initial={comm} onSaved={load} />}
       <JobsSection />
+      <IbkrSection />
       <PlatformsSection />
       <McpSection />
       <SourcesSection />
@@ -188,9 +189,126 @@ function JobsSection() {
   );
 }
 
+/* ------------------------------------------------------------------- IBKR */
+
+function IbkrSection() {
+  const [cfg, setCfg] = useState<Record<string, any> | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<any>(null);
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    api.get("/api/settings/ibkr").then(setCfg).catch(() => setCfg({}));
+  }, []);
+
+  if (!cfg) return null;
+  const tradingOn = String(cfg.trading_enabled).toLowerCase() === "true";
+
+  async function save() {
+    setMsg(null);
+    try {
+      const saved = await api.put("/api/settings/ibkr", {
+        host: String(cfg!.host ?? ""), port: String(cfg!.port ?? ""),
+        client_id: String(cfg!.client_id ?? ""), account: String(cfg!.account ?? ""),
+        trading_enabled: String(cfg!.trading_enabled ?? "false"),
+      });
+      setCfg(saved);
+      setMsg("✅ Gespeichert.");
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  async function test() {
+    setTesting(true);
+    setTestResult(null);
+    setMsg(null);
+    try {
+      setTestResult(await api.get("/api/broker/ibkr/status"));
+    } catch (e: any) {
+      setMsg(`❌ ${e.message}`);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  const field = (key: string, label: string, width = "w-36", hint?: string) => (
+    <label className="text-xs text-slate-400">
+      {label}
+      <input value={cfg[key] ?? ""} title={hint}
+        onChange={(e) => setCfg({ ...cfg, [key]: e.target.value })}
+        className={`mt-0.5 block ${width} rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200`} />
+    </label>
+  );
+
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <h2 className="mb-1 font-semibold">🏦 IBKR (Interactive Brokers)</h2>
+      <p className="mb-3 text-xs text-slate-500">
+        Die App spricht das <code>ib-gateway</code> (Docker-intern) an. Gateway aktivieren:{" "}
+        <code>COMPOSE_PROFILES=ibkr</code> plus <code>IBKR_USERID</code>/<code>IBKR_PASSWORD</code> in
+        der <code>.env</code> — die Zugangsdaten bleiben beim Gateway-Container und erreichen die App nie.
+        Port 4004 = Paper-Konto, 4003 = Live.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        {field("host", "Host")}
+        {field("port", "Port", "w-20", "4004 Paper · 4003 Live")}
+        {field("client_id", "Client-ID", "w-20", "Beliebige freie ID (die TWS-API erlaubt keine Doppelnutzung)")}
+        {field("account", "Konto (optional)", "w-32", "leer = Default-Konto der Session")}
+        <label className="flex items-center gap-2 pb-1 text-xs"
+          title="Ohne Haken ist die Verbindung strikt read-only — kein Endpoint kann Orders senden">
+          <input type="checkbox" checked={tradingOn}
+            onChange={(e) => setCfg({ ...cfg, trading_enabled: e.target.checked ? "true" : "false" })} />
+          <span className={tradingOn ? "font-semibold text-amber-400" : "text-slate-400"}>
+            Orders erlauben {tradingOn && "⚠️"}
+          </span>
+        </label>
+        <button onClick={save} className="rounded bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500">
+          Speichern
+        </button>
+        <button onClick={test} disabled={testing}
+          className="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-emerald-500 disabled:opacity-50">
+          {testing ? "Verbinde…" : "Verbindung testen"}
+        </button>
+      </div>
+      {msg && <p className="mt-2 text-sm text-amber-400">{msg}</p>}
+      {testResult && (
+        <div className="mt-3 rounded border border-emerald-900/60 bg-emerald-950/20 p-3 text-xs">
+          <div className="mb-1 font-semibold text-emerald-400">
+            ✅ Verbunden (Server v{testResult.server_version}) · Konten: {testResult.accounts?.join(", ") || "—"}
+            {testResult.trading_enabled ? " · Trading AKTIV ⚠️" : " · read-only"}
+          </div>
+          <div className="flex flex-wrap gap-4 text-slate-300">
+            {Object.entries(testResult.summary || {}).map(([tag, v]: any) => (
+              <span key={tag}>{tag}: <b>{Number(v.value).toLocaleString("de-DE")} {v.currency}</b></span>
+            ))}
+          </div>
+          {testResult.positions?.length > 0 && (
+            <div className="mt-1 text-slate-400">
+              IBKR-Positionen: {testResult.positions.map((p: any) => `${p.symbol}×${p.quantity}`).join(", ")}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 /* ------------------------------------------------------- Handelsplattformen */
 
-type FeeTier = { up_to: number | null; fee: number };
+type FeeTier = {
+  up_to: number | null;
+  fee?: number;        // Flat
+  pct?: number;        // Anteil vom Volumen (0.0005 = 0,05 %)
+  per_share?: number;  // pro Aktie (IBKR US)
+  min?: number; max?: number; max_pct?: number;
+};
+
+function tierModel(t: FeeTier): "fee" | "pct" | "per_share" {
+  if (t.pct !== undefined && t.pct !== null) return "pct";
+  if (t.per_share !== undefined && t.per_share !== null) return "per_share";
+  return "fee";
+}
 type Platform = { id: number; name: string; fees: Record<string, FeeTier[]> };
 
 function PlatformsSection() {
@@ -245,12 +363,19 @@ function PlatformEditor({ platform, onChanged, onMsg }: {
   const [group, setGroup] = useState(groups[0] || "default");
   const tiers = fees[group] || [];
 
-  function setTier(i: number, field: "up_to" | "fee", raw: string) {
-    const next = tiers.map((t, idx) => idx === i ? {
-      ...t,
-      [field]: raw === "" ? (field === "up_to" ? null : 0) : parseFloat(raw.replace(",", ".")),
-    } : t);
-    setFees({ ...fees, [group]: next });
+  function patchTier(i: number, patch: Partial<FeeTier>) {
+    setFees({ ...fees, [group]: tiers.map((t, idx) => idx === i ? { ...t, ...patch } : t) });
+  }
+
+  function setNum(i: number, field: keyof FeeTier, raw: string, scale = 1) {
+    const v = raw === "" ? undefined : parseFloat(raw.replace(",", ".")) / scale;
+    patchTier(i, { [field]: field === "up_to" && v === undefined ? null : v } as Partial<FeeTier>);
+  }
+
+  function setModel(i: number, model: "fee" | "pct" | "per_share") {
+    const t = tiers[i];
+    const value = t.fee ?? t.pct ?? t.per_share ?? 0;
+    patchTier(i, { fee: undefined, pct: undefined, per_share: undefined, [model]: value });
   }
 
   async function save() {
@@ -301,25 +426,63 @@ function PlatformEditor({ platform, onChanged, onMsg }: {
       </div>
       <table className="mt-2 text-xs">
         <thead className="text-slate-500">
-          <tr><th className="pr-4 text-left">Volumen bis (leer = darüber)</th><th className="pr-4 text-left">Gebühr</th><th /></tr>
+          <tr>
+            <th className="pr-3 text-left">Volumen bis (leer = darüber)</th>
+            <th className="pr-3 text-left">Modell</th>
+            <th className="pr-3 text-left">Satz</th>
+            <th className="pr-3 text-left">Min</th>
+            <th className="pr-3 text-left">Max</th>
+            <th className="pr-3 text-left" title="Deckel als % vom Volumen (z.B. IBKR US: 1%)">Max %</th>
+            <th />
+          </tr>
         </thead>
         <tbody>
-          {tiers.map((t, i) => (
-            <tr key={i}>
-              <td className="pr-4 py-0.5">
-                <input value={t.up_to ?? ""} onChange={(e) => setTier(i, "up_to", e.target.value)}
-                  placeholder="∞" className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-1" />
-              </td>
-              <td className="pr-4 py-0.5">
-                <input value={t.fee} onChange={(e) => setTier(i, "fee", e.target.value)}
-                  className="w-20 rounded border border-slate-700 bg-slate-900 px-2 py-1" />
-              </td>
-              <td>
-                <button onClick={() => setFees({ ...fees, [group]: tiers.filter((_, idx) => idx !== i) })}
-                  className="text-rose-400 hover:underline">✕</button>
-              </td>
-            </tr>
-          ))}
+          {tiers.map((t, i) => {
+            const model = tierModel(t);
+            const inputCls = "rounded border border-slate-700 bg-slate-900 px-2 py-1";
+            return (
+              <tr key={i}>
+                <td className="pr-3 py-0.5">
+                  <input value={t.up_to ?? ""} onChange={(e) => setNum(i, "up_to", e.target.value)}
+                    placeholder="∞" className={`w-24 ${inputCls}`} />
+                </td>
+                <td className="pr-3 py-0.5">
+                  <select value={model} onChange={(e) => setModel(i, e.target.value as any)}
+                    className={inputCls}>
+                    <option value="fee">Flat</option>
+                    <option value="pct">% vom Volumen</option>
+                    <option value="per_share">pro Aktie</option>
+                  </select>
+                </td>
+                <td className="pr-3 py-0.5">
+                  <input
+                    value={model === "pct"
+                      ? (t.pct !== undefined ? +(t.pct * 100).toFixed(6) : "")
+                      : (t[model] ?? "")}
+                    onChange={(e) => setNum(i, model, e.target.value, model === "pct" ? 100 : 1)}
+                    className={`w-20 ${inputCls}`} />
+                  {model === "pct" && <span className="ml-1 text-slate-500">%</span>}
+                </td>
+                <td className="pr-3 py-0.5">
+                  <input value={t.min ?? ""} onChange={(e) => setNum(i, "min", e.target.value)}
+                    placeholder="—" className={`w-16 ${inputCls}`} />
+                </td>
+                <td className="pr-3 py-0.5">
+                  <input value={t.max ?? ""} onChange={(e) => setNum(i, "max", e.target.value)}
+                    placeholder="—" className={`w-16 ${inputCls}`} />
+                </td>
+                <td className="pr-3 py-0.5">
+                  <input value={t.max_pct !== undefined ? +(t.max_pct * 100).toFixed(4) : ""}
+                    onChange={(e) => setNum(i, "max_pct", e.target.value, 100)}
+                    placeholder="—" className={`w-16 ${inputCls}`} />
+                </td>
+                <td>
+                  <button onClick={() => setFees({ ...fees, [group]: tiers.filter((_, idx) => idx !== i) })}
+                    className="text-rose-400 hover:underline">✕</button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       <button onClick={() => setFees({ ...fees, [group]: [...tiers, { up_to: null, fee: 0 }] })}
