@@ -37,10 +37,154 @@ export default function SettingsPage() {
       </p>
       {llm && <LlmSection initial={llm} onSaved={load} />}
       {comm && <CommSection initial={comm} onSaved={load} />}
+      <JobsSection />
       <PlatformsSection />
       <McpSection />
       <SourcesSection />
     </div>
+  );
+}
+
+/* ------------------------------------------------------------ Jobs/Zeitpläne */
+
+type JobInfo = {
+  id: string; label: string; unit: string; setting: string | null;
+  interval: string; editable: boolean; running: boolean;
+  last_run: { ts: number; ok: boolean; info?: string; duration_s?: number } | null;
+  next_run: string | null;
+};
+
+const UNIT_LABEL: Record<string, string> = { min: "Min", days: "Tage", time: "Uhr (UTC)" };
+
+function JobsSection() {
+  const [jobs, setJobs] = useState<JobInfo[]>([]);
+  const [segments, setSegments] = useState("");
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    api.get("/api/jobs").then((d) => {
+      setJobs(d.jobs);
+      setSegments(d.optimize_segments);
+    }).catch((e) => setMsg(e.message));
+  }, []);
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  async function saveIntervals() {
+    setMsg(null);
+    const payload: Record<string, string> = {};
+    for (const j of jobs) {
+      if (j.setting && edits[j.id] !== undefined && edits[j.id] !== j.interval) {
+        payload[j.setting] = edits[j.id];
+      }
+    }
+    if (segments) payload.optimize_segments = segments;
+    try {
+      await api.put("/api/settings/scheduler", payload);
+      setEdits({});
+      setMsg("✅ Gespeichert — der Worker übernimmt die Zeitpläne binnen 20 s.");
+      load();
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  async function runNow(id: string) {
+    setMsg(null);
+    try {
+      await api.post(`/api/jobs/${id}/run`);
+      setMsg(`▶ ${id} angestoßen — Start binnen 20 s, Status aktualisiert sich hier.`);
+      setTimeout(load, 25000);
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  function lastRunCell(j: JobInfo) {
+    if (j.running) return <span className="text-amber-400">⏳ läuft…</span>;
+    const lr = j.last_run;
+    if (!lr) return <span className="text-slate-600">—</span>;
+    const when = new Date(lr.ts * 1000).toLocaleString("de-DE",
+      { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    return (
+      <span title={`${lr.info || ""}${lr.duration_s ? ` (${Math.round(lr.duration_s)}s)` : ""}`}>
+        {lr.ok ? "✅" : "❌"} {when}
+      </span>
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <div className="mb-1 flex items-center gap-3">
+        <h2 className="font-semibold">⏱️ Zeitpläne & Jobs</h2>
+        <span className="text-xs text-slate-500">
+          Intervalle greifen ohne Neustart · „▶" startet den Job sofort im Worker
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs text-slate-500">
+            <tr>
+              <th className="py-1 pr-3">Job</th>
+              <th className="py-1 pr-3">Intervall</th>
+              <th className="py-1 pr-3">Letzter Lauf</th>
+              <th className="py-1 pr-3">Nächster Lauf</th>
+              <th className="py-1"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map((j) => (
+              <tr key={j.id} className="border-t border-slate-800">
+                <td className="py-1.5 pr-3">{j.label}</td>
+                <td className="py-1.5 pr-3">
+                  {j.editable ? (
+                    <span className="flex items-center gap-1">
+                      <input
+                        value={edits[j.id] ?? j.interval}
+                        onChange={(e) => setEdits((s) => ({ ...s, [j.id]: e.target.value }))}
+                        className="w-20 rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs"
+                        title={j.unit === "days" ? "0 = deaktiviert" : undefined}
+                      />
+                      <span className="text-xs text-slate-500">{UNIT_LABEL[j.unit]}</span>
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-500">{j.interval} {UNIT_LABEL[j.unit]} (fix)</span>
+                  )}
+                </td>
+                <td className="py-1.5 pr-3 text-xs">{lastRunCell(j)}</td>
+                <td className="py-1.5 pr-3 text-xs text-slate-400">
+                  {j.next_run
+                    ? new Date(j.next_run).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+                    : <span className="text-slate-600">pausiert</span>}
+                </td>
+                <td className="py-1.5 text-right">
+                  <button onClick={() => runNow(j.id)} disabled={j.running}
+                    title="Sofort im Worker starten"
+                    className="rounded border border-slate-700 px-2 py-0.5 text-xs text-slate-300 hover:border-emerald-500 disabled:opacity-40">
+                    ▶
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <label className="text-xs text-slate-500">Optimierungs-Segmente:</label>
+        <input value={segments} onChange={(e) => setSegments(e.target.value)}
+          title='Komma-getrennt; "+" gruppiert zu einem Lauf (z.B. US+NASDAQ100,DAX,CRYPTO)'
+          className="w-64 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs" />
+        <button onClick={saveIntervals}
+          className="rounded bg-sky-600 px-3 py-1 text-xs font-semibold hover:bg-sky-500">
+          Speichern
+        </button>
+        {msg && <span className="text-xs text-amber-400">{msg}</span>}
+      </div>
+    </section>
   );
 }
 

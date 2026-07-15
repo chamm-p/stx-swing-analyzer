@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     # Discovery: nächtlicher Breiten-Scan über komplette Börsenverzeichnisse
     # (kleine/unbekannte Werte) — rein technisch, mit Liquiditäts-Vorfilter
     discovery_enabled: bool = True
+    discovery_time: str = "02:30"  # täglicher Lauf (HH:MM, UTC)
     discovery_regions: str = "US,DE"
     discovery_min_price: float = 2.0           # Mindestkurs (Penny-Stock-Filter)
     discovery_min_turnover: float = 500_000.0  # Ø-Tagesumsatz Kurs×Volumen

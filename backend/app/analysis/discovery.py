@@ -17,6 +17,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.scoring import effective_threshold, get_profile, technical_score
+from app.analysis.targets import compute_price_targets
 from app.config import get_settings
 from app.models import DiscoveryResult, utcnow
 from app.processing.indicators import compute_indicators
@@ -62,11 +63,14 @@ def _score_frame(df: pd.DataFrame, profile, threshold: float) -> dict | None:
     if len(closes) >= 6 and closes.iloc[-6]:
         change_7d = round((close - float(closes.iloc[-6])) / float(closes.iloc[-6]) * 100, 2)
 
+    # BUY/SELL nie ohne Zielzone — ATR-basiert, wie in der Pipeline
+    targets = compute_price_targets(snapshot, action, horizon_days=14) or {}
     return {
         "action": action, "technical_score": round(tech, 4), "close": close,
         "change_1d": change_1d, "change_7d": change_7d,
         "avg_turnover": round(turnover),
-        "snapshot": {**snapshot, "components": components, "profile": profile.name},
+        "snapshot": {**snapshot, **targets,
+                     "components": components, "profile": profile.name},
     }
 
 

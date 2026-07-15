@@ -65,6 +65,78 @@ async def put_comm(payload: CommSettings, db: AsyncSession = Depends(get_db)):
     return await public_view(db, "comm")
 
 
+# ---------------------------------------------------------------- Jobs
+
+class SchedulerSettings(BaseModel):
+    fetch_market_interval_min: str | None = None
+    fetch_news_interval_min: str | None = None
+    analyze_interval_min: str | None = None
+    scan_interval_min: str | None = None
+    optimize_interval_days: str | None = None
+    optimize_segments: str | None = None
+    universe_refresh_days: str | None = None
+    discovery_time: str | None = None
+
+
+@router.get("/jobs")
+async def list_jobs(db: AsyncSession = Depends(get_db)):
+    """Alle Worker-Jobs mit Intervall, letztem und nächstem Lauf.
+
+    Letzter/nächster Lauf kommen aus Redis (der Worker schreibt sie);
+    Intervalle sind Runtime-Settings und ohne Neustart änderbar."""
+    from app import jobs
+
+    cfg = await load_settings(db, "scheduler")
+    last = await jobs.last_runs()
+    nxt = await jobs.next_runs()
+    out = []
+    for job_id, spec in jobs.JOBS.items():
+        setting = spec.get("setting")
+        out.append({
+            "id": job_id,
+            "label": spec["label"],
+            "unit": spec["unit"],
+            "setting": setting,
+            "interval": str(cfg.get(setting)) if setting else str(spec.get("fixed", "")),
+            "editable": setting is not None,
+            "last_run": last.get(job_id),
+            "next_run": nxt.get(job_id),
+            "running": await jobs.is_locked(job_id),
+        })
+    return {"jobs": out, "optimize_segments": str(cfg.get("optimize_segments") or "")}
+
+
+@router.post("/jobs/{job_id}/run", status_code=202)
+async def run_job(job_id: str):
+    """Ad-hoc-Start — der Worker-Tick nimmt den Trigger binnen 20s auf."""
+    from app import jobs
+
+    if job_id not in jobs.JOBS:
+        raise HTTPException(status_code=404, detail=f"Unbekannter Job: {job_id}")
+    if await jobs.is_locked(job_id):
+        raise HTTPException(status_code=409, detail="Job läuft bereits")
+    await jobs.request_run(job_id)
+    return {"requested": True}
+
+
+@router.put("/settings/scheduler")
+async def put_scheduler(payload: SchedulerSettings, db: AsyncSession = Depends(get_db)):
+    data = payload.model_dump(exclude_none=True)
+    for field, value in data.items():
+        value = value.strip()
+        if value == "":
+            continue  # leer = zurück auf Env-Default
+        if field == "discovery_time":
+            import re
+            if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", value):
+                raise HTTPException(status_code=422,
+                                    detail="discovery_time muss HH:MM (UTC) sein")
+        elif field != "optimize_segments" and not value.lstrip("-").isdigit():
+            raise HTTPException(status_code=422, detail=f"{field} muss eine Zahl sein")
+    await save_settings(db, "scheduler", data)
+    return await load_settings(db, "scheduler")
+
+
 @router.post("/settings/llm/test")
 async def test_llm(payload: LlmSettings, db: AsyncSession = Depends(get_db)):
     """Mini-Completion als Verbindungstest (Cache per Nonce umgangen)."""

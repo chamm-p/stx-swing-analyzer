@@ -1,10 +1,15 @@
 """APScheduler-Jobs: Marktdaten-Sync, News-Fetch, Analyse-Pipeline.
 
 Läuft im Worker-Container (worker_main.py). max_instances=1 verhindert
-überlappende Läufe bei langsamen LLM-Antworten.
+überlappende Läufe bei langsamen LLM-Antworten. Ein 20s-Tick nimmt
+Ad-hoc-Trigger aus der API auf und gleicht Intervalle mit den
+Runtime-Settings (Kategorie "scheduler") ab — Änderungen im UI greifen
+ohne Worker-Neustart.
 """
 
+import asyncio
 import logging
+import time
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
@@ -101,8 +106,10 @@ async def job_auto_optimize() -> None:
     async with SessionLocal() as db:
         platform = await db.scalar(select(TradingPlatform).limit(1))
         platform_id = platform.id if platform else None
+        sched_cfg = await load_settings(db, "scheduler")
+    segments_cfg = str(sched_cfg.get("optimize_segments") or s.optimize_segments)
 
-    for segment in [x.strip().upper() for x in s.optimize_segments.split(",") if x.strip()]:
+    for segment in [x.strip().upper() for x in segments_cfg.split(",") if x.strip()]:
         # Eskalationsleiter: erst normaler Flat-Guard, bei negativem OOS ein
         # zweiter Lauf mit strengem Guard (handelt nur Fenster mit deutlich
         # positivem Training). Bleibt es negativ, wird KEIN Parametersatz
@@ -218,35 +225,165 @@ async def job_paper_trading() -> None:
             logger.exception("Auto-Trading fehlgeschlagen: %s", e)
 
 
+# -------------------------------------------------------- Job-Verwaltung
+
+JOB_FUNCS = {
+    "sync_market": job_sync_market,
+    "sync_news": job_sync_news,
+    "analyze": job_analyze,
+    "scan_universe": job_scan_universe,
+    "paper_trading": job_paper_trading,
+    "discovery": job_discovery,
+    "auto_optimize": job_auto_optimize,
+    "refresh_universe": job_refresh_universe,
+}
+
+_scheduler: AsyncIOScheduler | None = None
+_applied: dict[str, tuple] = {}  # job_id -> zuletzt angewendetes Intervall
+
+
+def wrapped_job(job_id: str):
+    """Job mit Lauf-Protokoll (Redis) und Doppelstart-Schutz."""
+    fn = JOB_FUNCS[job_id]
+
+    async def run() -> None:
+        from app import jobs
+        if not await jobs.acquire_lock(job_id):
+            logger.info("Job %s übersprungen — läuft bereits", job_id)
+            return
+        t0 = time.monotonic()
+        try:
+            await fn()
+            await jobs.record_run(job_id, True, duration_s=time.monotonic() - t0)
+        except Exception as e:
+            logger.exception("Job %s fehlgeschlagen: %s", job_id, e)
+            await jobs.record_run(job_id, False, str(e), duration_s=time.monotonic() - t0)
+        finally:
+            await jobs.release_lock(job_id)
+
+    run.__name__ = f"job_{job_id}"
+    return run
+
+
+def _parse_time(raw) -> tuple[int, int] | None:
+    try:
+        hour, minute = str(raw).strip().split(":")
+        hour, minute = int(hour), int(minute)
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour, minute
+    except (ValueError, AttributeError):
+        pass
+    return None
+
+
+async def job_tick() -> None:
+    """Ad-hoc-Trigger ausführen, Intervalle mit den Runtime-Settings
+    abgleichen, nächste Laufzeiten für die API publizieren."""
+    from app import jobs
+    from app.services_settings import load_settings
+
+    for job_id in JOB_FUNCS:
+        if await jobs.pop_trigger(job_id):
+            logger.info("Ad-hoc-Start: %s", job_id)
+            asyncio.create_task(wrapped_job(job_id)())
+
+    async with SessionLocal() as db:
+        cfg = await load_settings(db, "scheduler")
+    for job_id, spec in jobs.JOBS.items():
+        setting = spec.get("setting")
+        if not setting or _scheduler is None:
+            continue
+        if spec["unit"] == "time":
+            parsed = _parse_time(cfg.get(setting))
+            if parsed is None:
+                continue
+            desired: tuple = ("time", *parsed)
+        else:
+            try:
+                value = int(float(cfg.get(setting)))
+            except (TypeError, ValueError):
+                continue
+            desired = (spec["unit"], value)
+        if _applied.get(job_id) == desired:
+            continue
+        try:
+            if desired[0] == "time":
+                _scheduler.reschedule_job(job_id, trigger="cron",
+                                          hour=desired[1], minute=desired[2])
+            elif desired[1] <= 0:
+                _scheduler.pause_job(job_id)  # 0 = aus
+            else:
+                kwargs = {"minutes": desired[1]} if desired[0] == "min" else {"days": desired[1]}
+                _scheduler.reschedule_job(job_id, trigger="interval", **kwargs)
+            _applied[job_id] = desired
+            logger.info("Job %s umgeplant: %s", job_id, desired)
+        except Exception as e:
+            logger.warning("Umplanen von %s fehlgeschlagen: %s", job_id, e)
+
+    if _scheduler is not None:
+        next_map = {}
+        for job_id in JOB_FUNCS:
+            j = _scheduler.get_job(job_id)
+            nrt = getattr(j, "next_run_time", None) if j else None
+            next_map[job_id] = nrt.isoformat() if nrt else None
+        await jobs.publish_next_runs(next_map)
+
+
 def build_scheduler() -> AsyncIOScheduler:
+    global _scheduler
     s = get_settings()
     scheduler = AsyncIOScheduler(timezone="UTC")
-    scheduler.add_job(job_sync_market, "interval", minutes=s.fetch_market_interval_min,
+    scheduler.add_job(wrapped_job("sync_market"), "interval",
+                      minutes=s.fetch_market_interval_min,
                       id="sync_market", max_instances=1, coalesce=True)
-    scheduler.add_job(job_sync_news, "interval", minutes=s.fetch_news_interval_min,
+    scheduler.add_job(wrapped_job("sync_news"), "interval",
+                      minutes=s.fetch_news_interval_min,
                       id="sync_news", max_instances=1, coalesce=True)
-    scheduler.add_job(job_analyze, "interval", minutes=s.analyze_interval_min,
+    scheduler.add_job(wrapped_job("analyze"), "interval",
+                      minutes=s.analyze_interval_min,
                       id="analyze", max_instances=1, coalesce=True)
-    scheduler.add_job(job_scan_universe, "interval", minutes=s.scan_interval_min,
+    scheduler.add_job(wrapped_job("scan_universe"), "interval",
+                      minutes=s.scan_interval_min,
                       id="scan_universe", max_instances=1, coalesce=True)
     # Stündlich zusätzlich: Horizont-Exits + fällige Signal-Auswertungen,
     # unabhängig vom Analyse-Rhythmus
-    scheduler.add_job(job_paper_trading, "interval", minutes=60,
+    scheduler.add_job(wrapped_job("paper_trading"), "interval", minutes=60,
                       id="paper_trading", max_instances=1, coalesce=True)
-    if s.optimize_interval_days > 0:
-        scheduler.add_job(job_auto_optimize, "interval",
-                          days=s.optimize_interval_days,
-                          id="auto_optimize", max_instances=1, coalesce=True)
-    if s.discovery_enabled:
-        # Nachts, wenn US-Schlusskurse final sind und nichts anderes läuft
-        scheduler.add_job(job_discovery, "cron", hour=2, minute=30,
-                          id="discovery", max_instances=1, coalesce=True)
-    if s.universe_refresh_days > 0:
-        from datetime import datetime, timedelta, timezone
-        scheduler.add_job(job_refresh_universe, "interval",
-                          days=s.universe_refresh_days,
-                          # kurz nach dem Start einmal laufen, damit die
-                          # Index-Segmente nicht erst in 30 Tagen entstehen
-                          next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
-                          id="refresh_universe", max_instances=1, coalesce=True)
+    hour, minute = _parse_time(s.discovery_time) or (2, 30)
+    # Nachts, wenn US-Schlusskurse final sind und nichts anderes läuft
+    scheduler.add_job(wrapped_job("discovery"), "cron", hour=hour, minute=minute,
+                      id="discovery", max_instances=1, coalesce=True)
+    optimize_kwargs = {} if s.optimize_interval_days > 0 else {"next_run_time": None}
+    scheduler.add_job(wrapped_job("auto_optimize"), "interval",
+                      days=max(s.optimize_interval_days, 1),
+                      id="auto_optimize", max_instances=1, coalesce=True,
+                      **optimize_kwargs)  # 0 = pausiert starten
+
+    from datetime import datetime, timedelta, timezone
+    refresh_kwargs = (
+        # kurz nach dem Start einmal laufen, damit die Index-Segmente
+        # nicht erst in 30 Tagen entstehen
+        {"next_run_time": datetime.now(timezone.utc) + timedelta(minutes=3)}
+        if s.universe_refresh_days > 0 else {"next_run_time": None}
+    )
+    scheduler.add_job(wrapped_job("refresh_universe"), "interval",
+                      days=max(s.universe_refresh_days, 1),
+                      id="refresh_universe", max_instances=1, coalesce=True,
+                      **refresh_kwargs)
+
+    scheduler.add_job(job_tick, "interval", seconds=20,
+                      id="tick", max_instances=1, coalesce=True)
+
+    # Der erste Tick soll nur bei echten DB-Overrides umplanen — sonst
+    # würde er z.B. den Initial-Refresh (+3 Min) sofort wegplanen.
+    _applied.update({
+        "sync_market": ("min", s.fetch_market_interval_min),
+        "sync_news": ("min", s.fetch_news_interval_min),
+        "analyze": ("min", s.analyze_interval_min),
+        "scan_universe": ("min", s.scan_interval_min),
+        "auto_optimize": ("days", s.optimize_interval_days),
+        "refresh_universe": ("days", s.universe_refresh_days),
+        "discovery": ("time", hour, minute),
+    })
+    _scheduler = scheduler
     return scheduler

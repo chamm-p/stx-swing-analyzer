@@ -65,6 +65,18 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "telegram_chat_id": ("telegram_chat_id", False),
         "telegram_bot_token": ("telegram_bot_token", True),
     },
+    # Job-Intervalle — der Worker-Tick gleicht laufend mit dem APScheduler
+    # ab (Änderungen greifen ohne Neustart, ≤ 20s)
+    "scheduler": {
+        "fetch_market_interval_min": ("fetch_market_interval_min", False),
+        "fetch_news_interval_min": ("fetch_news_interval_min", False),
+        "analyze_interval_min": ("analyze_interval_min", False),
+        "scan_interval_min": ("scan_interval_min", False),
+        "optimize_interval_days": ("optimize_interval_days", False),
+        "optimize_segments": ("optimize_segments", False),
+        "universe_refresh_days": ("universe_refresh_days", False),
+        "discovery_time": ("discovery_time", False),
+    },
 }
 
 

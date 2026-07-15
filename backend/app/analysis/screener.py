@@ -12,6 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.scoring import effective_threshold, get_profile, technical_score
+from app.analysis.targets import compute_price_targets
 from app.models import ScreenerResult, UniverseSymbol, utcnow
 from app.processing.indicators import compute_indicators
 from app.services_redis import get_redis
@@ -57,10 +58,13 @@ async def scan_universe(db: AsyncSession) -> int:
                     action = "SELL"
                 else:
                     action = "HOLD"
+                # BUY/SELL nie ohne Zielzone — ATR-basiert, wie in der Pipeline
+                targets = compute_price_targets(snapshot, action, horizon_days=14) or {}
                 rows.append(ScreenerResult(
                     run_at=run_at, symbol=u.symbol, action=action,
                     technical_score=round(tech, 4), close=snapshot.get("close"),
-                    snapshot={**snapshot, "components": components, "profile": profile.name},
+                    snapshot={**snapshot, **targets,
+                              "components": components, "profile": profile.name},
                 ))
             except Exception as e:
                 logger.warning("Screener: %s übersprungen (%s)", u.symbol, e)

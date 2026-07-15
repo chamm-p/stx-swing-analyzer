@@ -262,6 +262,7 @@ export default function TopSignalsPage() {
                 <SortHeader label="Tech-Score" k="score" sort={sort} onToggle={toggleSort} title="Signiert: bullish ↔ bearish" />
                 <SortHeader label="RSI" k="rsi" sort={sort} onToggle={toggleSort} />
                 <SortHeader label="Kurs" k="close" sort={sort} onToggle={toggleSort} />
+                <th className="px-3 py-2" title="ATR-basierte Zielzone (Horizont ~14d) — bei BUY/SELL immer gesetzt">Ziel / Stop</th>
                 <th className="px-3 py-2" title="Kursänderung — wechselt alle 4 s zwischen Vortag (1T) und 7 Tagen (7T)">Δ</th>
                 <th className="px-3 py-2"></th>
               </tr>
@@ -284,6 +285,15 @@ export default function TopSignalsPage() {
                   </td>
                   <td className="px-3 py-2 text-slate-400">{r.snapshot?.rsi14?.toFixed(0) ?? "—"}</td>
                   <td className="px-3 py-2">{r.close ?? "—"}</td>
+                  <td className="px-3 py-2 text-slate-400">
+                    {r.snapshot?.target_price ? (
+                      <span title={r.snapshot.risk_reward ? `CRV 1:${r.snapshot.risk_reward}` : undefined}>
+                        <span className="text-emerald-400">{r.snapshot.target_price.toFixed(2)}</span>
+                        {" / "}
+                        <span className="text-rose-400">{r.snapshot.stop_price?.toFixed(2)}</span>
+                      </span>
+                    ) : "—"}
+                  </td>
                   <td className="px-3 py-2"><PriceDelta d1={r.change_1d} d7={r.change_7d} /></td>
                   <td className="px-3 py-2 text-right">
                     {rowStatus[r.symbol] ? (
