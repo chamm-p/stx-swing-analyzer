@@ -245,13 +245,9 @@ async def latest_close(db: AsyncSession, symbol: str) -> float | None:
     return result.scalar()
 
 
-async def price_deltas(db: AsyncSession, symbols: list[str]) -> dict[str, dict]:
-    """Prozentuale Kursänderung zum Vortag (change_1d) und zu ~7 Kalendertagen
-    (change_7d) je Symbol — aus den Tages-Bars (Ohlcv). Ein Batch-Query holt die
-    letzten 10 Bars je Symbol (deckt ~2 Wochen ab); Rest in Python.
-
-    Rückgabe: ``{SYM: {"change_1d": float|None, "change_7d": float|None}}``
-    (Prozent, signiert; None wenn nicht genug Historie)."""
+async def recent_bars(db: AsyncSession, symbols: list[str], n: int = 10) -> dict[str, list]:
+    """Letzte n Tages-Bars je Symbol als {SYM: [(ts, close), …]} —
+    ts-absteigend (neuester zuerst), ein Batch-Query für alle Symbole."""
     syms = sorted({(s or "").upper() for s in symbols if s})
     if not syms:
         return {}
@@ -263,12 +259,33 @@ async def price_deltas(db: AsyncSession, symbols: list[str]) -> dict[str, dict]:
     ).subquery()
     rows = (await db.execute(
         select(sub.c.symbol, sub.c.ts, sub.c.close)
-        .where(sub.c.rn <= 10)
+        .where(sub.c.rn <= n)
         .order_by(sub.c.symbol, desc(sub.c.ts))
     )).all()
     by: dict[str, list] = {}
     for sym, ts, close in rows:
         by.setdefault(sym, []).append((ts, close))
+    return by
+
+
+def close_near(bars: list, days_back: int) -> float | None:
+    """Close des Bars, der ~days_back Kalendertage vor dem neuesten liegt
+    (nächstgelegener älterer Bar — überbrückt Wochenenden/Feiertage)."""
+    if len(bars) < 2:
+        return None
+    target = bars[0][0] - timedelta(days=days_back)
+    _, close = min(bars[1:], key=lambda b: abs((b[0] - target).total_seconds()))
+    return close
+
+
+async def price_deltas(db: AsyncSession, symbols: list[str]) -> dict[str, dict]:
+    """Prozentuale Kursänderung zum Vortag (change_1d) und zu ~7 Kalendertagen
+    (change_7d) je Symbol — aus den Tages-Bars (Ohlcv). Ein Batch-Query holt die
+    letzten 10 Bars je Symbol (deckt ~2 Wochen ab); Rest in Python.
+
+    Rückgabe: ``{SYM: {"change_1d": float|None, "change_7d": float|None}}``
+    (Prozent, signiert; None wenn nicht genug Historie)."""
+    by = await recent_bars(db, symbols)
 
     out: dict[str, dict] = {}
     for sym, bars in by.items():

@@ -132,8 +132,39 @@ async def _portfolio_summary(db: AsyncSession, portfolio: Portfolio) -> dict:
         elif pv["pnl_abs"] is not None:
             realized += pv["pnl_abs"]
     platform = await db.get(TradingPlatform, portfolio.platform_id) if portfolio.platform_id else None
+
+    # Wertänderung 1T/7T über die offenen Positionen (Batch aus Ohlcv).
+    # Näherung: aktuelle Stückzahlen zu beiden Zeitpunkten (Trades innerhalb
+    # des Fensters werden nicht zeitanteilig gerechnet); Positionen ohne
+    # Kurshistorie bleiben außen vor. Cash dämpft den Prozentwert bewusst —
+    # es ist die ehrliche Bewegung des Gesamtportfolios, nicht der Einzelkurse.
+    change_1d = change_7d = None
+    open_pos = [p for p in positions if p.exit_date is None]
+    if open_pos:
+        bars = await yahoo.recent_bars(db, [p.symbol for p in open_pos])
+        now1 = prev1 = now7 = prev7 = 0.0
+        for p in open_pos:
+            b = bars.get(p.symbol) or []
+            if not b or b[0][1] is None:
+                continue
+            latest = b[0][1]
+            c1 = b[1][1] if len(b) >= 2 else None
+            if c1:
+                now1 += p.quantity * latest
+                prev1 += p.quantity * c1
+            c7 = yahoo.close_near(b, 7)
+            if c7:
+                now7 += p.quantity * latest
+                prev7 += p.quantity * c7
+        base_cash = portfolio.cash if _tracks_cash(portfolio) else 0.0
+        if prev1:
+            change_1d = round((now1 - prev1) / (prev1 + base_cash) * 100, 2)
+        if prev7:
+            change_7d = round((now7 - prev7) / (prev7 + base_cash) * 100, 2)
+
     out = {
         "id": portfolio.id, "name": portfolio.name, "kind": portfolio.kind,
+        "change_1d": change_1d, "change_7d": change_7d,
         "watch_enabled": portfolio.watch_enabled,
         "platform_id": portfolio.platform_id,
         "platform_name": platform.name if platform else None,

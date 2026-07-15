@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import PriceDelta from "@/components/PriceDelta";
 
 type PortfolioSummary = {
   id: number; name: string; kind: string; open_positions: number;
   invested: number; value: number; pnl_abs: number; pnl_pct: number; realized_pnl: number;
+  change_1d: number | null; change_7d: number | null;
   watch_enabled: boolean;
   platform_id: number | null; platform_name: string | null; fees_total: number;
   cash?: number; total_value?: number; total_pnl_abs?: number; total_pnl_pct?: number;
@@ -148,7 +150,12 @@ export default function PortfoliosPage() {
             )}
             <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
               <div>
-                <div className="font-semibold">{p.value.toLocaleString("de-DE", { maximumFractionDigits: 0 })}</div>
+                <div className="font-semibold">
+                  {p.value.toLocaleString("de-DE", { maximumFractionDigits: 0 })}
+                  <span title="Wertänderung des Gesamtportfolios (offene Positionen; Cash dämpft) — wechselt zwischen Vortag (1T) und 7 Tagen (7T)">
+                    <PriceDelta d1={p.change_1d} d7={p.change_7d} className="ml-2 text-xs" />
+                  </span>
+                </div>
                 <div className="text-xs text-slate-500">Wert</div>
               </div>
               <div>
