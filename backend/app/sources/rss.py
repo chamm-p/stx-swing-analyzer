@@ -101,6 +101,25 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
         await db.commit()
         return 0
 
+    # Reddit-Quellen: bevorzugt über die offizielle OAuth-API (stabil,
+    # kein 429-Fingerprint-Filter) — Credentials aus den Einstellungen.
+    from app.sources.reddit import subreddit_from_url
+    subreddit = subreddit_from_url(source.url)
+    if subreddit:
+        from app.services_settings import load_settings
+        reddit_cfg = await load_settings(db, "reddit")
+        if reddit_cfg.get("client_id") and reddit_cfg.get("client_secret"):
+            from app.sources.reddit import fetch_subreddit_entries
+            try:
+                entries = await fetch_subreddit_entries(
+                    subreddit, reddit_cfg["client_id"], reddit_cfg["client_secret"])
+            except Exception as e:
+                source.last_error = f"Reddit-API fehlgeschlagen: {e}"[:500]
+                source.last_fetch_at = utcnow()
+                await db.commit()
+                return 0
+            return await _store_articles(db, source, entries)
+
     async def _get() -> bytes:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True,
                                      headers=_FEED_HEADERS) as client:
@@ -128,24 +147,37 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
         return 0
 
     feed = await asyncio.to_thread(feedparser.parse, raw)
-    keyword_map = await _build_keyword_map(db)
+    entries = [{
+        "title": getattr(entry, "title", "") or "",
+        "url": getattr(entry, "link", None),
+        "summary": getattr(entry, "summary", None),
+        "published": _entry_published(entry),
+    } for entry in feed.entries]
+    return await _store_articles(db, source, entries)
 
+
+async def _store_articles(db: AsyncSession, source: DataSource, entries: list[dict]) -> int:
+    """Artikel-Dicts (RSS oder Reddit-API) deduplizieren und speichern."""
+    keyword_map = await _build_keyword_map(db)
     new_count = 0
-    for entry in feed.entries[:100]:
-        url = getattr(entry, "link", None)
-        title = getattr(entry, "title", "") or ""
+    for e in entries[:100]:
+        title = e.get("title") or ""
         if not title:
             continue
+        url = e.get("url")
         url_hash = hashlib.sha256((url or title).encode()).hexdigest()
         exists = await db.scalar(
             select(NewsArticle.id).where(NewsArticle.url_hash == url_hash).limit(1)
         )
         if exists:
             continue
-        summary = getattr(entry, "summary", None)
+        published = e.get("published")
+        if published is None and e.get("published_ts"):
+            published = datetime.fromtimestamp(float(e["published_ts"]), tz=timezone.utc)
+        summary = e.get("summary")
         symbols = _match_symbols(f"{title} {summary or ''}", keyword_map)
         db.add(NewsArticle(
-            published_at=_entry_published(entry),
+            published_at=published or utcnow(),
             source_id=source.id,
             source_name=source.name,
             title=title,

@@ -65,6 +65,25 @@ async def put_comm(payload: CommSettings, db: AsyncSession = Depends(get_db)):
     return await public_view(db, "comm")
 
 
+class RedditSettings(BaseModel):
+    client_id: str | None = None
+    client_secret: str | None = None  # leer = Bestand behalten
+
+
+@router.get("/settings/reddit")
+async def get_reddit(db: AsyncSession = Depends(get_db)):
+    return await public_view(db, "reddit")
+
+
+@router.put("/settings/reddit")
+async def put_reddit(payload: RedditSettings, db: AsyncSession = Depends(get_db)):
+    await save_settings(db, "reddit", payload.model_dump(exclude_none=True))
+    # Token-Cache leeren — neue Credentials sollen sofort gelten
+    from app.services_redis import get_redis
+    await get_redis().delete("reddit:token")
+    return await public_view(db, "reddit")
+
+
 # ---------------------------------------------------------------- Jobs
 
 class SchedulerSettings(BaseModel):

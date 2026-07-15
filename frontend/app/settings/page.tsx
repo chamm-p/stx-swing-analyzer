@@ -39,6 +39,7 @@ export default function SettingsPage() {
       {comm && <CommSection initial={comm} onSaved={load} />}
       <JobsSection />
       <IbkrSection />
+      <RedditSection />
       <PlatformsSection />
       <McpSection />
       <SourcesSection />
@@ -292,6 +293,64 @@ function IbkrSection() {
           )}
         </div>
       )}
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ Reddit */
+
+function RedditSection() {
+  const [clientId, setClientId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [hasSecret, setHasSecret] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get("/api/settings/reddit").then((d) => {
+      setClientId(d.client_id || "");
+      setHasSecret(!!d.has_client_secret);
+    }).catch(() => {});
+  }, []);
+
+  async function save() {
+    setMsg(null);
+    try {
+      const d = await api.put("/api/settings/reddit", {
+        client_id: clientId, client_secret: secret || undefined,
+      });
+      setHasSecret(!!d.has_client_secret);
+      setSecret("");
+      setMsg("✅ Gespeichert — Reddit-Quellen laufen ab dem nächsten News-Sync über die API.");
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <h2 className="mb-1 font-semibold">👽 Reddit-API</h2>
+      <p className="mb-3 text-xs text-slate-500">
+        Reddit filtert automatisierte RSS-Abrufe (429). Mit einer kostenlosen API-App laufen die
+        r/-Quellen stabil über OAuth: auf <code>reddit.com/prefs/apps</code> eine App vom Typ{" "}
+        <b>„script"</b> anlegen — die ID steht unter dem App-Namen, das Secret daneben.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-xs text-slate-400">
+          Client-ID
+          <input value={clientId} onChange={(e) => setClientId(e.target.value)}
+            className="mt-0.5 block w-44 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200" />
+        </label>
+        <label className="text-xs text-slate-400">
+          Client-Secret {hasSecret && <span className="text-emerald-500">(gesetzt)</span>}
+          <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)}
+            placeholder={hasSecret ? "unverändert lassen" : ""}
+            className="mt-0.5 block w-52 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200" />
+        </label>
+        <button onClick={save} className="rounded bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500">
+          Speichern
+        </button>
+        {msg && <span className="text-xs text-amber-400">{msg}</span>}
+      </div>
     </section>
   );
 }

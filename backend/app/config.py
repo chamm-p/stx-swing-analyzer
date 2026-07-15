@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     ibkr_trading_enabled: bool = False  # Orders nur nach explizitem Opt-in
     ibkr_sync_interval_min: int = 60    # Bestands-Sync verknüpfter Portfolios
 
+    # Reddit-API (reddit.com/prefs/apps, Typ "script") — Reddit filtert
+    # RSS-Auto-Abrufe; mit Credentials laufen r/-Quellen über OAuth
+    reddit_client_id: str = ""
+    reddit_client_secret: str = ""
+
     # MCP-Server: statisches Zugriffs-Token für /api/mcp (leer = deaktiviert)
     mcp_token: str = ""
 

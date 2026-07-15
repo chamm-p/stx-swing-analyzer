@@ -65,6 +65,11 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "telegram_chat_id": ("telegram_chat_id", False),
         "telegram_bot_token": ("telegram_bot_token", True),
     },
+    # Reddit-OAuth (script-App) — für r/-Quellen statt gefiltertem RSS
+    "reddit": {
+        "client_id": ("reddit_client_id", False),
+        "client_secret": ("reddit_client_secret", True),
+    },
     # IBKR-API-Zugang (Gateway-Socket; Zugangsdaten liegen beim Gateway)
     "ibkr": {
         "host": ("ibkr_host", False),
