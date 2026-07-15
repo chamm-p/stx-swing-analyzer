@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/UserMenu";
+import NavOptimierung from "@/components/NavOptimierung";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,12 +25,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/top" className="text-sm text-slate-300 hover:text-white">Top-Signale</Link>
             <Link href="/watchlist" className="text-sm text-slate-300 hover:text-white">Watchlist</Link>
             <Link href="/portfolios" className="text-sm text-slate-300 hover:text-white">Portfolios</Link>
-            <Link href="/review" className="text-sm text-slate-300 hover:text-white">Review</Link>
-            <Link href="/backtest" className="text-sm text-slate-300 hover:text-white">Backtest</Link>
-            <Link href="/settings" className="text-sm text-slate-300 hover:text-white">⚙️ Einstellungen</Link>
+            <NavOptimierung />
             <span className="ml-auto hidden text-xs text-slate-500 lg:block">
               Keine Anlageberatung
             </span>
+            <Link href="/settings" title="Einstellungen" aria-label="Einstellungen"
+              className="rounded-full border border-slate-700 px-2.5 py-1 text-sm hover:border-sky-500">
+              ⚙️
+            </Link>
             <UserMenu />
             <ThemeToggle />
           </div>

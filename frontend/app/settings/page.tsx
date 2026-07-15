@@ -235,13 +235,12 @@ function IbkrSection() {
     }
   }
 
-  const field = (key: string, label: string, width = "w-36", hint?: string) => (
-    <label className="text-xs text-slate-400">
-      {label}
+  const field = (key: string, label: string, hint?: string) => (
+    <Field label={label}>
       <input value={cfg[key] ?? ""} title={hint}
         onChange={(e) => setCfg({ ...cfg, [key]: e.target.value })}
-        className={`mt-0.5 block ${width} rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200`} />
-    </label>
+        className={inputCls} />
+    </Field>
   );
 
   return (
@@ -253,12 +252,12 @@ function IbkrSection() {
         der <code>.env</code> — die Zugangsdaten bleiben beim Gateway-Container und erreichen die App nie.
         Port 4004 = Paper-Konto, 4003 = Live.
       </p>
-      <div className="flex flex-wrap items-end gap-3">
+      <FieldGrid>
         {field("host", "Host")}
-        {field("port", "Port", "w-20", "4004 Paper · 4003 Live")}
-        {field("client_id", "Client-ID", "w-20", "Beliebige freie ID (die TWS-API erlaubt keine Doppelnutzung)")}
-        {field("account", "Konto (optional)", "w-32", "leer = Default-Konto der Session")}
-        <label className="flex items-center gap-2 pb-1 text-xs"
+        {field("port", "Port", "4004 Paper · 4003 Live")}
+        {field("client_id", "Client-ID", "Beliebige freie ID (die TWS-API erlaubt keine Doppelnutzung)")}
+        {field("account", "Konto (optional)", "leer = Default-Konto der Session")}
+        <label className="flex items-center gap-2 self-end pb-2 text-xs"
           title="Ohne Haken ist die Verbindung strikt read-only — kein Endpoint kann Orders senden">
           <input type="checkbox" checked={tradingOn}
             onChange={(e) => setCfg({ ...cfg, trading_enabled: e.target.checked ? "true" : "false" })} />
@@ -266,11 +265,13 @@ function IbkrSection() {
             Orders erlauben {tradingOn && "⚠️"}
           </span>
         </label>
-        <button onClick={save} className="rounded bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500">
+      </FieldGrid>
+      <div className="mt-3 flex items-center gap-3">
+        <button onClick={save} className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">
           Speichern
         </button>
         <button onClick={test} disabled={testing}
-          className="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-emerald-500 disabled:opacity-50">
+          className="rounded border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:border-emerald-500 disabled:opacity-50">
           {testing ? "Verbinde…" : "Verbindung testen"}
         </button>
       </div>
@@ -334,19 +335,17 @@ function RedditSection() {
         r/-Quellen stabil über OAuth: auf <code>reddit.com/prefs/apps</code> eine App vom Typ{" "}
         <b>„script"</b> anlegen — die ID steht unter dem App-Namen, das Secret daneben.
       </p>
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="text-xs text-slate-400">
-          Client-ID
-          <input value={clientId} onChange={(e) => setClientId(e.target.value)}
-            className="mt-0.5 block w-44 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200" />
-        </label>
-        <label className="text-xs text-slate-400">
-          Client-Secret {hasSecret && <span className="text-emerald-500">(gesetzt)</span>}
+      <FieldGrid cols={2}>
+        <Field label="Client-ID">
+          <input value={clientId} onChange={(e) => setClientId(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label={`Client-Secret${hasSecret ? " (gesetzt)" : ""}`}>
           <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)}
-            placeholder={hasSecret ? "unverändert lassen" : ""}
-            className="mt-0.5 block w-52 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200" />
-        </label>
-        <button onClick={save} className="rounded bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500">
+            placeholder={hasSecret ? "unverändert lassen" : ""} className={inputCls} />
+        </Field>
+      </FieldGrid>
+      <div className="mt-3 flex items-center gap-3">
+        <button onClick={save} className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">
           Speichern
         </button>
         {msg && <span className="text-xs text-amber-400">{msg}</span>}
@@ -739,19 +738,19 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
       <h2 className="mb-3 font-semibold">🤖 LLM</h2>
-      <div className="flex flex-wrap gap-3">
+      <FieldGrid>
         <Field label="Provider">
-          <select value={provider} onChange={(e) => setProvider(e.target.value)} className={inputCls + " w-44"}>
+          <select value={provider} onChange={(e) => setProvider(e.target.value)} className={inputCls}>
             <option value="openai">OpenAI-kompatibel</option>
             <option value="anthropic">Anthropic</option>
           </select>
         </Field>
-        <Field label="Base-URL (vLLM, Ollama, OpenRouter, …)">
-          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className={inputCls + " w-96"} />
+        <Field label="Base-URL (vLLM, Ollama, OpenRouter, …)" className="lg:col-span-2">
+          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className={inputCls} />
         </Field>
         <Field label="Thinking/Reasoning">
           <select value={reasoningMode} onChange={(e) => setReasoningMode(e.target.value)}
-            className={inputCls + " w-64"}
+            className={inputCls}
             title="Reasoning-Modelle denken sonst exzessiv — kostet Latenz und Tokens">
             <option value="none">Nicht steuern (Modell entscheidet)</option>
             <option value="qwen_template">Aus — Qwen3/3.5/3.6 auf vLLM</option>
@@ -759,24 +758,24 @@ function LlmSection({ initial, onSaved }: { initial: LlmView; onSaved: () => voi
             <option value="disable_field">Aus — MiniMax-Stil (disable_thinking)</option>
           </select>
         </Field>
-        <Field label={`API-Key ${initial.has_api_key ? "(gespeichert — leer lassen zum Behalten)" : ""}`}>
+        <Field label={`API-Key ${initial.has_api_key ? "(gespeichert — leer = behalten)" : ""}`}>
           <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-            placeholder={initial.has_api_key ? "••••••••" : "sk-…"} className={inputCls + " w-72"} />
+            placeholder={initial.has_api_key ? "••••••••" : "sk-…"} className={inputCls} />
         </Field>
-        <Field label="Modell">
+        <Field label="Modell" className="lg:col-span-2">
           <div className="flex gap-2">
             <input value={model} onChange={(e) => setModel(e.target.value)} list="llm-models"
-              className={inputCls + " w-72"} />
+              className={inputCls} />
             <datalist id="llm-models">
               {models.map((m) => <option key={m} value={m} />)}
             </datalist>
             <button onClick={fetchModels} disabled={busy}
-              className="rounded border border-slate-700 px-3 py-2 text-sm hover:border-sky-500 disabled:opacity-50">
+              className="shrink-0 rounded border border-slate-700 px-3 py-2 text-sm hover:border-sky-500 disabled:opacity-50">
               {busy ? "Lade…" : "Modelle laden"}
             </button>
           </div>
         </Field>
-      </div>
+      </FieldGrid>
       {models.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {models.slice(0, 20).map((m) => (
@@ -870,26 +869,26 @@ function CommSection({ initial, onSaved }: { initial: CommView; onSaved: () => v
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
       <h2 className="mb-3 font-semibold">📨 Kommunikation (Alerts)</h2>
-      <div className="mb-2 text-sm text-slate-400">E-Mail (SMTP)</div>
-      <div className="flex flex-wrap gap-3">
-        <Field label="SMTP-Host"><input value={form.smtp_host} onChange={(e) => set("smtp_host", e.target.value)} className={inputCls + " w-64"} /></Field>
-        <Field label="Port"><input value={form.smtp_port} onChange={(e) => set("smtp_port", e.target.value)} className={inputCls + " w-20"} /></Field>
-        <Field label="Benutzer"><input value={form.smtp_user} onChange={(e) => set("smtp_user", e.target.value)} className={inputCls + " w-64"} /></Field>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">E-Mail (SMTP)</div>
+      <FieldGrid>
+        <Field label="SMTP-Host"><input value={form.smtp_host} onChange={(e) => set("smtp_host", e.target.value)} className={inputCls} /></Field>
+        <Field label="Port"><input value={form.smtp_port} onChange={(e) => set("smtp_port", e.target.value)} className={inputCls} /></Field>
+        <Field label="Benutzer"><input value={form.smtp_user} onChange={(e) => set("smtp_user", e.target.value)} className={inputCls} /></Field>
         <Field label={`Passwort ${initial.has_smtp_password ? "(gespeichert)" : ""}`}>
           <input type="password" value={form.smtp_password} onChange={(e) => set("smtp_password", e.target.value)}
-            placeholder={initial.has_smtp_password ? "••••••••" : ""} className={inputCls + " w-52"} />
+            placeholder={initial.has_smtp_password ? "••••••••" : ""} className={inputCls} />
         </Field>
-        <Field label="Absender (From)"><input value={form.smtp_from} onChange={(e) => set("smtp_from", e.target.value)} className={inputCls + " w-64"} /></Field>
-        <Field label="Alert-Empfänger"><input value={form.alert_email_to} onChange={(e) => set("alert_email_to", e.target.value)} className={inputCls + " w-64"} /></Field>
-      </div>
-      <div className="mb-2 mt-4 text-sm text-slate-400">Telegram</div>
-      <div className="flex flex-wrap gap-3">
+        <Field label="Absender (From)"><input value={form.smtp_from} onChange={(e) => set("smtp_from", e.target.value)} className={inputCls} /></Field>
+        <Field label="Alert-Empfänger"><input value={form.alert_email_to} onChange={(e) => set("alert_email_to", e.target.value)} className={inputCls} /></Field>
+      </FieldGrid>
+      <div className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Telegram</div>
+      <FieldGrid cols={2}>
         <Field label={`Bot-Token ${initial.has_telegram_bot_token ? "(gespeichert)" : ""}`}>
           <input type="password" value={form.telegram_bot_token} onChange={(e) => set("telegram_bot_token", e.target.value)}
-            placeholder={initial.has_telegram_bot_token ? "••••••••" : "123456:ABC…"} className={inputCls + " w-72"} />
+            placeholder={initial.has_telegram_bot_token ? "••••••••" : "123456:ABC…"} className={inputCls} />
         </Field>
-        <Field label="Chat-ID"><input value={form.telegram_chat_id} onChange={(e) => set("telegram_chat_id", e.target.value)} className={inputCls + " w-44"} /></Field>
-      </div>
+        <Field label="Chat-ID"><input value={form.telegram_chat_id} onChange={(e) => set("telegram_chat_id", e.target.value)} className={inputCls} /></Field>
+      </FieldGrid>
       <div className="mt-3 flex items-center gap-3">
         <button onClick={save} className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">
           Speichern
@@ -988,13 +987,24 @@ function SourcesSection() {
 /* ----------------------------------------------------------------- Helfer */
 
 const inputCls =
-  "rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500";
+  "w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/** Beschriftetes Feld; erzwingt volle Breite auf direkten Inputs/Selects,
+ *  damit alle Felder im Grid sauber in Spalten fluchten. */
+function Field({ label, children, className = "" }: {
+  label: string; children: React.ReactNode; className?: string;
+}) {
   return (
-    <label className="flex flex-col gap-1 text-xs text-slate-400">
-      {label}
+    <label className={`flex min-w-0 flex-col gap-1 text-xs text-slate-400 [&>input]:w-full [&>select]:w-full ${className}`}>
+      <span className="truncate" title={label}>{label}</span>
       {children}
     </label>
   );
+}
+
+/** Responsives Formular-Raster — Felder richten sich in gleich breiten
+ *  Spalten aus statt beim Umbruch zu zerfransen. */
+function FieldGrid({ children, cols = 3 }: { children: React.ReactNode; cols?: 2 | 3 }) {
+  const lg = cols === 2 ? "sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-3";
+  return <div className={`grid grid-cols-1 gap-x-4 gap-y-3 ${lg}`}>{children}</div>;
 }
