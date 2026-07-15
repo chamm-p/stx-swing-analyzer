@@ -13,6 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Asset, DataSource, NewsArticle, WatchlistItem, utcnow
 from app.sources.base import with_retry
 
+# Reddit & Co. blocken generische Bot-UAs — beschreibende Kennung nach
+# Reddit-Konvention ("platform:app:version") senkt die 429-Quote deutlich.
+_FEED_HEADERS = {
+    "User-Agent": "web:stx-swing-analyzer:v1.0 (self-hosted single-user RSS reader)",
+    "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8",
+}
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_FEEDS = [
@@ -77,16 +84,43 @@ async def _build_keyword_map(db: AsyncSession) -> dict[str, list[str]]:
 
 
 async def fetch_source(db: AsyncSession, source: DataSource) -> int:
-    """Einen RSS-Feed abrufen und neue Artikel speichern. Liefert Anzahl neuer Artikel."""
+    """Einen RSS-Feed abrufen und neue Artikel speichern. Liefert Anzahl neuer Artikel.
+
+    429-Schutz (Reddit & Co. filtern Auto-Abfragen): beschreibender
+    User-Agent nach Reddit-Konvention statt Generic-Bot-Kennung, und bei
+    429 eine Redis-Pause (Retry-After, min. 2h) — weiterhämmern
+    verlängert die Sperre nur."""
+    from app.services_redis import get_redis
+    from app.sources.base import RateLimited
+
+    r = get_redis()
+    cooldown_key = f"rss:cooldown:{source.id}"
+    ttl = await r.ttl(cooldown_key)
+    if ttl and ttl > 0:
+        source.last_error = f"Rate-Limit-Pause — nächster Versuch in ~{ttl // 60} Min"
+        await db.commit()
+        return 0
+
     async def _get() -> bytes:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True,
-                                     headers={"User-Agent": "stx-swing-analyzer/1.0"}) as client:
+                                     headers=_FEED_HEADERS) as client:
             resp = await client.get(source.url)
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("Retry-After") or 0)
+                raise RateLimited(max(retry_after, 7200))
             resp.raise_for_status()
             return resp.content
 
     try:
         raw = await with_retry(_get, label=f"rss:{source.name}")
+    except RateLimited as e:
+        await r.set(cooldown_key, "1", ex=e.wait_seconds)
+        source.last_error = (f"429 Too Many Requests — Quelle pausiert "
+                             f"{e.wait_seconds // 3600}h (automatisch)")
+        source.last_fetch_at = utcnow()
+        await db.commit()
+        logger.warning("rss:%s rate-limited — Pause %ds", source.name, e.wait_seconds)
+        return 0
     except RuntimeError as e:
         source.last_error = str(e)[:500]
         source.last_fetch_at = utcnow()
@@ -150,7 +184,7 @@ async def fetch_symbol_news(db: AsyncSession) -> int:
 
         async def _get() -> bytes:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True,
-                                         headers={"User-Agent": "stx-swing-analyzer/1.0"}) as client:
+                                         headers=_FEED_HEADERS) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 return resp.content

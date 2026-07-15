@@ -80,15 +80,37 @@ export default function PortfolioDetailPage() {
     if (!qty || qty <= 0) return;
     const px = window.prompt(`Verkaufskurs für ${p.symbol} (leer = aktueller Kurs ${p.current_price ?? "?"})`, "");
     if (px === null) return;
+    let exitPrice: number | null = px ? parseFloat(px.replace(",", ".")) : null;
+    let ibkrNote = "";
+
+    // Echte Order zuerst — der Fill-Preis wird zum Buchungskurs.
+    const sm = detail?.summary;
+    const viaIbkr = sm?.kind === "real"
+      && (sm?.platform_name || "").toUpperCase().startsWith("IBKR")
+      && confirm(`🏦 Echte SELL-Order (Market) über IBKR senden: ${qty} × ${p.symbol}?\n\nOK = Order an IBKR + App-Buchung · Abbrechen = nur in der App buchen`);
+    if (viaIbkr) {
+      try {
+        const order = await api.post("/api/broker/ibkr/order", {
+          symbol: p.symbol, side: "SELL", quantity: qty,
+          order_type: "MKT", confirm: true,
+        });
+        if (order.avg_fill_price) exitPrice = order.avg_fill_price;
+        ibkrNote = ` · IBKR ${order.status}` +
+          (order.avg_fill_price ? ` @ ${order.avg_fill_price}` : "") +
+          (order.commission ? `, Kommission ${order.commission}` : "");
+      } catch (err: any) {
+        if (!confirm(`❌ IBKR-Order fehlgeschlagen: ${err.message}\n\nTrotzdem nur in der App buchen?`)) return;
+      }
+    }
+
     try {
       const res = await api.post(`/api/positions/${p.id}/close`, {
         quantity: qty,
-        exit_price: px ? parseFloat(px.replace(",", ".")) : null,
+        exit_price: exitPrice,
       });
       setError(null);
-      if (res.remaining > 0) {
-        alert(`${res.sold_quantity} Stück zu ${res.exit_price} verkauft — ${res.remaining} bleiben offen.`);
-      }
+      alert(`${res.sold_quantity} Stück zu ${res.exit_price} verkauft` +
+        (res.remaining > 0 ? ` — ${res.remaining} bleiben offen.` : ".") + ibkrNote);
       load();
     } catch (err: any) {
       setError(err.message);
