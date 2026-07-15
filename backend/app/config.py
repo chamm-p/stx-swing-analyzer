@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     ibkr_client_id: int = 17
     ibkr_account: str = ""         # leer = Default-Konto der Session
     ibkr_trading_enabled: bool = False  # Orders nur nach explizitem Opt-in
+    ibkr_sync_interval_min: int = 60    # Bestands-Sync verknüpfter Portfolios
 
     # MCP-Server: statisches Zugriffs-Token für /api/mcp (leer = deaktiviert)
     mcp_token: str = ""

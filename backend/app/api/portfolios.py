@@ -62,6 +62,7 @@ class PortfolioUpdate(BaseModel):
     watch_enabled: bool | None = None
     platform_id: int | None = None  # -1 = Plattform entfernen
     start_capital: float | None = Field(default=None, gt=0)
+    ibkr_sync: bool | None = None  # echtes Depot: IBKR-Bestände spiegeln
     config: AutoConfig | None = None
 
 
@@ -199,6 +200,7 @@ async def _portfolio_summary(db: AsyncSession, portfolio: Portfolio) -> dict:
 
     out = {
         "id": portfolio.id, "name": portfolio.name, "kind": portfolio.kind,
+        "ibkr_sync": bool((portfolio.config or {}).get("ibkr_sync")),
         "change_1d": change_1d, "change_7d": change_7d,
         "watch_enabled": portfolio.watch_enabled,
         "platform_id": portfolio.platform_id,
@@ -270,11 +272,37 @@ async def update_portfolio(portfolio_id: int, payload: PortfolioUpdate,
         cfg["start_capital"] = payload.start_capital
         portfolio.config = cfg
         portfolio.cash += payload.start_capital - old
+    if payload.ibkr_sync is not None:
+        if portfolio.kind != "real":
+            raise HTTPException(status_code=422,
+                                detail="IBKR-Sync nur für echte Portfolios")
+        portfolio.config = {**(portfolio.config or {}), "ibkr_sync": payload.ibkr_sync}
     if payload.config is not None and portfolio.kind == "auto":
         merged = payload.config.model_dump()
         portfolio.config = {**(portfolio.config or {}), **merged}
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/portfolios/{portfolio_id}/ibkr-sync")
+async def ibkr_sync_now(portfolio_id: int, db: AsyncSession = Depends(get_db)):
+    """IBKR-Bestände sofort in dieses Portfolio spiegeln (read-only) —
+    funktioniert auch als einmaliger Import ohne aktivierten Auto-Sync."""
+    from app.broker.ibkr_sync import _reconcile, fetch_ibkr_state
+
+    portfolio = await db.get(Portfolio, portfolio_id)
+    if not portfolio:
+        raise HTTPException(status_code=404, detail="Portfolio nicht gefunden")
+    if portfolio.kind != "real":
+        raise HTTPException(status_code=422, detail="IBKR-Sync nur für echte Portfolios")
+    try:
+        state = await fetch_ibkr_state(db)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=(
+            f"IBKR-Gateway nicht erreichbar: {e} — läuft der ib-gateway-Container?"))
+    stats = await _reconcile(db, portfolio, state)
+    return {"ok": True, **stats,
+            "ibkr_positions": len(state["positions"]), "cash": state.get("cash")}
 
 
 @router.delete("/portfolios/{portfolio_id}")

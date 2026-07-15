@@ -29,6 +29,8 @@ JOBS: dict[str, dict] = {
                   "setting": "discovery_time", "unit": "time"},
     "digest": {"label": "Tägliche Handelsempfehlung (Kauf + Bestands-Review)",
                "setting": "digest_times", "unit": "times"},
+    "ibkr_sync": {"label": "IBKR-Bestands-Sync (verknüpfte Portfolios)",
+                  "setting": "ibkr_sync_interval_min", "unit": "min"},
     "auto_optimize": {"label": "Segment-Auto-Optimierung (Walk-Forward)",
                       "setting": "optimize_interval_days", "unit": "days"},
     "refresh_universe": {"label": "Index-Mitgliedschaften aktualisieren",

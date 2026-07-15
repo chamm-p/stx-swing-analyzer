@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import PriceDelta from "@/components/PriceDelta";
 
 type PortfolioSummary = {
-  id: number; name: string; kind: string; open_positions: number;
+  id: number; name: string; kind: string; ibkr_sync?: boolean; open_positions: number;
   invested: number; value: number; pnl_abs: number; pnl_pct: number; realized_pnl: number;
   change_1d: number | null; change_7d: number | null;
   watch_enabled: boolean;
@@ -142,6 +142,34 @@ export default function PortfoliosPage() {
                 {(KIND_BADGE[p.kind] || KIND_BADGE.real).label}
               </span>
             </div>
+            {p.kind === "real" && (
+              <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
+                <label className="flex items-center gap-1"
+                  title="IBKR-Bestände automatisch spiegeln (stündlich, read-only): neue Positionen mit echtem Einstand, extern Verkauftes wird geschlossen, Cash übernommen">
+                  <input type="checkbox" checked={!!p.ibkr_sync}
+                    onChange={async (e) => {
+                      await api.patch(`/api/portfolios/${p.id}`, { ibkr_sync: e.target.checked });
+                      load();
+                    }} />
+                  🏦 IBKR-Sync
+                </label>
+                <button
+                  onClick={async () => {
+                    try {
+                      const r = await api.post(`/api/portfolios/${p.id}/ibkr-sync`);
+                      alert(`⟳ IBKR-Sync: ${r.added} neu, ${r.updated} angepasst, ${r.closed} geschlossen` +
+                        ` (IBKR: ${r.ibkr_positions} Positionen${r.cash != null ? `, Cash ${r.cash}` : ""})`);
+                      load();
+                    } catch (e: any) {
+                      alert(`❌ ${e.message}`);
+                    }
+                  }}
+                  title="Jetzt sofort abgleichen (auch als einmaliger Import nutzbar)"
+                  className="rounded border border-slate-700 px-2 py-0.5 hover:border-sky-500">
+                  ⟳ jetzt
+                </button>
+              </div>
+            )}
             {p.config?.strategy && (
               <div className="mt-1 flex items-center gap-2 text-xs text-sky-400/80"
                 title={Object.entries(p.config.strategy).map(([k, v]) => `${k}=${v}`).join(", ")}>

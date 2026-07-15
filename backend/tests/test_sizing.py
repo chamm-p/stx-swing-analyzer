@@ -25,3 +25,18 @@ def test_crv():
     assert crv(100.0, None, 95.0) is None
     assert crv(100.0, 110.0, None) is None
     assert crv(100.0, 95.0, 90.0) is None     # Ziel unter Kurs
+
+
+# ------------------------------------------------------- IBKR-Symbol-Mapping
+
+def test_ibkr_yahoo_symbol_mapping():
+    from types import SimpleNamespace
+
+    from app.broker.ibkr_sync import yahoo_symbol
+
+    stk = lambda **kw: SimpleNamespace(secType="STK", primaryExchange="", **kw)
+    assert yahoo_symbol(stk(symbol="AAPL", currency="USD")) == "AAPL"
+    assert yahoo_symbol(stk(symbol="BRK B", currency="USD")) == "BRK-B"
+    assert yahoo_symbol(stk(symbol="SAP", currency="EUR")) == "SAP.DE"
+    assert yahoo_symbol(SimpleNamespace(secType="OPT", symbol="AAPL",
+                                        currency="USD", primaryExchange="")) is None

@@ -221,6 +221,18 @@ async def job_digest() -> None:
         logger.info("Digest: %s", info)
 
 
+async def job_ibkr_sync() -> None:
+    """IBKR-Bestände in verknüpfte Portfolios spiegeln (read-only).
+
+    Kein verknüpftes Portfolio → No-op ohne Gateway-Verbindung."""
+    from app.broker.ibkr_sync import sync_ibkr_portfolios
+
+    async with SessionLocal() as db:
+        stats = await sync_ibkr_portfolios(db)
+        if stats.get("linked"):
+            logger.info("IBKR-Sync: %s", stats)
+
+
 async def job_discovery() -> None:
     """Nächtlicher Discovery-Scan über die kompletten Börsenverzeichnisse."""
     from app.alerts.ops import track_failure, track_success
@@ -275,6 +287,7 @@ JOB_FUNCS = {
     "paper_trading": job_paper_trading,
     "discovery": job_discovery,
     "digest": job_digest,
+    "ibkr_sync": job_ibkr_sync,
     "auto_optimize": job_auto_optimize,
     "refresh_universe": job_refresh_universe,
 }
@@ -423,6 +436,10 @@ def build_scheduler() -> AsyncIOScheduler:
     digest_times = _parse_times(s.digest_times) or [(16, 45), (21, 15)]
     scheduler.add_job(wrapped_job("digest"), _times_trigger(digest_times),
                       id="digest", max_instances=1, coalesce=True)
+    scheduler.add_job(wrapped_job("ibkr_sync"), "interval",
+                      minutes=max(s.ibkr_sync_interval_min, 1),
+                      id="ibkr_sync", max_instances=1, coalesce=True,
+                      **({} if s.ibkr_sync_interval_min > 0 else {"next_run_time": None}))
     optimize_kwargs = {} if s.optimize_interval_days > 0 else {"next_run_time": None}
     scheduler.add_job(wrapped_job("auto_optimize"), "interval",
                       days=max(s.optimize_interval_days, 1),
@@ -455,6 +472,7 @@ def build_scheduler() -> AsyncIOScheduler:
         "refresh_universe": ("days", s.universe_refresh_days),
         "discovery": ("time", hour, minute),
         "digest": ("times", tuple(digest_times)),
+        "ibkr_sync": ("min", s.ibkr_sync_interval_min),
     })
     _scheduler = scheduler
     return scheduler

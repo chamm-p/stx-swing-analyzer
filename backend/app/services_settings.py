@@ -85,6 +85,7 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "universe_refresh_days": ("universe_refresh_days", False),
         "discovery_time": ("discovery_time", False),
         "digest_times": ("digest_times", False),
+        "ibkr_sync_interval_min": ("ibkr_sync_interval_min", False),
     },
 }
 
