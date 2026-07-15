@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.backtest import router as backtest_router
 from app.api.broker import router as broker_router
+from app.api.reports import router as reports_router
 from app.api.portfolios import router as portfolio_router
 from app.api.review import router as review_router
 from app.api.routes import router as api_router
@@ -86,6 +87,7 @@ app.include_router(review_router)
 app.include_router(screener_router)
 app.include_router(settings_router)
 app.include_router(broker_router)
+app.include_router(reports_router)
 
 
 @app.get("/api/health")

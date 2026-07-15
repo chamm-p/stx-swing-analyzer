@@ -29,7 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
+    from app.analysis.scoring import load_champion
+
     settings = get_settings()
+    await load_champion(db)
     asset = await db.get(Asset, symbol)
     if asset is None:
         logger.warning("Pipeline: Asset %s nicht gefunden", symbol)

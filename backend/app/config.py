@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # Schwelle fällt (Einstieg: >= Schwelle, Ausstieg: < Schwelle - Hysterese)
     signal_hysteresis: float = 0.10
 
+    # Tägliche Handelsempfehlung (Digest) — UTC-Zeiten, Komma-getrennt.
+    # Default: nach EU-Schluss (~16:45) und nach US-Schluss (~21:15).
+    digest_times: str = "16:45,21:15"
+
     # Goldene Swing-Regeln
     risk_per_trade_pct: float = 1.0  # 1%-Regel: max. Verlust je Trade bis Stop
     swing_min_crv: float = 1.5       # Mindest-CRV für automatische Käufe

@@ -341,9 +341,11 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
 
 async def run_auto_portfolios(db: AsyncSession) -> dict:
     """Führt Exits + Entries für alle aktiven Auto-Portfolios aus."""
+    from app.analysis.scoring import load_champion
     from app.config import get_settings
 
     s = get_settings()
+    await load_champion(db)
     result = await db.execute(select(Portfolio).where(Portfolio.kind == "auto"))
     stats = {"closed": 0, "opened": 0}
     for pf in result.scalars().all():

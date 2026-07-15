@@ -141,6 +141,7 @@ async def job_auto_optimize() -> None:
 
         m = run.metrics or {}
         reco = recommendation_from(m)
+        detail_lines: list[str] = []
         if run.status != "done":
             text = f"⚠️ Quartals-Optimierung {segment} fehlgeschlagen: {run.error}"
         else:
@@ -166,6 +167,34 @@ async def job_auto_optimize() -> None:
                                  "Strategie handelt dann selten.")
                 lines.append("→ Approve als Challenger: Backtest-Seite")
             text = "\n".join(lines)
+
+            # Detailbericht (nur E-Mail — Telegram bleibt kompakt):
+            # Fenstertabelle, Parameter-Streuung, Vergleich zum Champion
+            from app.analysis.scoring import load_champion
+            async with SessionLocal() as db:
+                current = await load_champion(db)
+            detail_lines.append("— Detailbericht —")
+            detail_lines.append(f"Aktive Live-Strategie: "
+                                f"{current or 'Defaults (threshold 0.35, Ziel 2.0×, Stop 1.5×)'}")
+            wins = m.get("param_wins") or {}
+            if wins:
+                detail_lines.append("Parameter-Gewinner über die Fenster:")
+                for key, count in sorted(wins.items(), key=lambda kv: -kv[1])[:5]:
+                    detail_lines.append(f"  {count}× {key}")
+            detail_lines.append("")
+            detail_lines.append("Fenster (Test-Zeitraum | Parameter | OOS-Rendite | Trades):")
+            for w in (m.get("windows") or []):
+                test = "→".join(w.get("test", []))
+                if w.get("skipped"):
+                    detail_lines.append(f"  {test} | ÜBERSPRUNGEN: {w['skipped']}")
+                elif w.get("flat"):
+                    detail_lines.append(f"  {test} | 💤 FLAT ({w['flat']})")
+                else:
+                    p = w.get("chosen_params") or {}
+                    params_short = ", ".join(f"{k.split('_')[0]}={v}" for k, v in p.items())
+                    detail_lines.append(
+                        f"  {test} | {params_short} | {w.get('test_return_pct')}% "
+                        f"| {w.get('test_trades')} Trades")
         async with SessionLocal() as db:
             comm = await load_settings(db, "comm")
         if comm.get("telegram_bot_token") and comm.get("telegram_chat_id"):
@@ -175,10 +204,21 @@ async def job_auto_optimize() -> None:
                 logger.error("Optimierungs-Telegram fehlgeschlagen: %s", e)
         if comm.get("smtp_host") and comm.get("alert_email_to"):
             try:
+                body = text + ("\n\n" + "\n".join(detail_lines) if detail_lines else "")
                 await asyncio.to_thread(send_email_sync, comm,
-                                        f"[stx] Quartals-Optimierung {segment}", text)
+                                        f"[stx] Quartals-Optimierung {segment}", body)
             except Exception as e:
                 logger.error("Optimierungs-E-Mail fehlgeschlagen: %s", e)
+
+
+async def job_digest() -> None:
+    """Tägliche Handelsempfehlung: Kauf-Kandidaten (1%-Regel-Stückzahlen)
+    + Halten/Verkaufen-Review je offener Position, via Alert-Kanäle."""
+    from app.analysis.recommendations import send_digest
+
+    async with SessionLocal() as db:
+        info = await send_digest(db)
+        logger.info("Digest: %s", info)
 
 
 async def job_discovery() -> None:
@@ -234,6 +274,7 @@ JOB_FUNCS = {
     "scan_universe": job_scan_universe,
     "paper_trading": job_paper_trading,
     "discovery": job_discovery,
+    "digest": job_digest,
     "auto_optimize": job_auto_optimize,
     "refresh_universe": job_refresh_universe,
 }
@@ -276,6 +317,22 @@ def _parse_time(raw) -> tuple[int, int] | None:
     return None
 
 
+def _parse_times(raw) -> list[tuple[int, int]] | None:
+    """Komma-Liste "16:45,21:15" → [(16,45), (21,15)]; None wenn unbrauchbar."""
+    times = [_parse_time(t) for t in str(raw or "").split(",") if t.strip()]
+    if not times or any(t is None for t in times):
+        return None
+    return sorted(set(times))  # type: ignore[arg-type]
+
+
+def _times_trigger(times: list[tuple[int, int]]):
+    from apscheduler.triggers.combining import OrTrigger
+    from apscheduler.triggers.cron import CronTrigger
+
+    crons = [CronTrigger(hour=h, minute=m, timezone="UTC") for h, m in times]
+    return crons[0] if len(crons) == 1 else OrTrigger(crons)
+
+
 async def job_tick() -> None:
     """Ad-hoc-Trigger ausführen, Intervalle mit den Runtime-Settings
     abgleichen, nächste Laufzeiten für die API publizieren."""
@@ -289,6 +346,9 @@ async def job_tick() -> None:
 
     async with SessionLocal() as db:
         cfg = await load_settings(db, "scheduler")
+        # Champion-Overrides (Strategie) im Worker-Prozess frisch halten
+        from app.analysis.scoring import load_champion
+        await load_champion(db)
     for job_id, spec in jobs.JOBS.items():
         setting = spec.get("setting")
         if not setting or _scheduler is None:
@@ -298,6 +358,11 @@ async def job_tick() -> None:
             if parsed is None:
                 continue
             desired: tuple = ("time", *parsed)
+        elif spec["unit"] == "times":
+            parsed_list = _parse_times(cfg.get(setting))
+            if parsed_list is None:
+                continue
+            desired = ("times", tuple(parsed_list))
         else:
             try:
                 value = int(float(cfg.get(setting)))
@@ -307,7 +372,9 @@ async def job_tick() -> None:
         if _applied.get(job_id) == desired:
             continue
         try:
-            if desired[0] == "time":
+            if desired[0] == "times":
+                _scheduler.reschedule_job(job_id, trigger=_times_trigger(list(desired[1])))
+            elif desired[0] == "time":
                 _scheduler.reschedule_job(job_id, trigger="cron",
                                           hour=desired[1], minute=desired[2])
             elif desired[1] <= 0:
@@ -353,6 +420,9 @@ def build_scheduler() -> AsyncIOScheduler:
     # Nachts, wenn US-Schlusskurse final sind und nichts anderes läuft
     scheduler.add_job(wrapped_job("discovery"), "cron", hour=hour, minute=minute,
                       id="discovery", max_instances=1, coalesce=True)
+    digest_times = _parse_times(s.digest_times) or [(16, 45), (21, 15)]
+    scheduler.add_job(wrapped_job("digest"), _times_trigger(digest_times),
+                      id="digest", max_instances=1, coalesce=True)
     optimize_kwargs = {} if s.optimize_interval_days > 0 else {"next_run_time": None}
     scheduler.add_job(wrapped_job("auto_optimize"), "interval",
                       days=max(s.optimize_interval_days, 1),
@@ -384,6 +454,7 @@ def build_scheduler() -> AsyncIOScheduler:
         "auto_optimize": ("days", s.optimize_interval_days),
         "refresh_universe": ("days", s.universe_refresh_days),
         "discovery": ("time", hour, minute),
+        "digest": ("times", tuple(digest_times)),
     })
     _scheduler = scheduler
     return scheduler

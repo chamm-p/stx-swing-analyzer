@@ -76,7 +76,14 @@ export default function PortfoliosPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-bold">Portfolios</h1>
+      <div className="flex items-center gap-3">
+        <h1 className="text-xl font-bold">Portfolios</h1>
+        <Link href="/reports/tax"
+          title="Realisierte Trades + Wertschriftenverzeichnis per 31.12. für die Steuererklärung (druckbar, CSV)"
+          className="ml-auto rounded border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-sky-500">
+          🧾 Steuerreport
+        </Link>
+      </div>
 
       <form onSubmit={create} className="space-y-2">
         <div className="flex flex-wrap gap-2">
@@ -136,9 +143,23 @@ export default function PortfoliosPage() {
               </span>
             </div>
             {p.config?.strategy && (
-              <div className="mt-1 text-xs text-sky-400/80"
+              <div className="mt-1 flex items-center gap-2 text-xs text-sky-400/80"
                 title={Object.entries(p.config.strategy).map(([k, v]) => `${k}=${v}`).join(", ")}>
                 🧪 Challenger-Strategie (Schwelle {p.config.strategy.threshold}, eigenes Scoring)
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Strategie-Parameter von „${p.name}" als globale Live-Signallogik übernehmen?\n\nGilt danach für Screener, Analysen und Zielzonen — nicht nur für dieses Portfolio.`)) return;
+                    try {
+                      const r = await api.post(`/api/portfolios/${p.id}/promote`);
+                      alert(`🏆 Champion übernommen: ${Object.entries(r.new).map(([k, v]) => `${k}=${v}`).join(", ")}\n(vorher: ${r.old ? Object.entries(r.old).map(([k, v]) => `${k}=${v}`).join(", ") : "Defaults"})`);
+                    } catch (e: any) {
+                      alert(`❌ ${e.message}`);
+                    }
+                  }}
+                  title="Bewährte Challenger-Parameter global in die Live-Signallogik übernehmen (Schwelle, Ziel-/Stop-Faktoren)"
+                  className="rounded border border-amber-700/60 px-2 py-0.5 text-amber-400 hover:border-amber-500">
+                  🏆 Zum Champion machen
+                </button>
               </div>
             )}
             {p.total_value !== undefined && (

@@ -106,6 +106,8 @@ async def run_discovery(db: AsyncSession) -> int:
 
     s = get_settings()
     try:
+        from app.analysis.scoring import load_champion
+        await load_champion(db)
         regions: list[tuple[str, list[list[str]]]] = []
         wanted = [x.strip().upper() for x in s.discovery_regions.split(",") if x.strip()]
         if "US" in wanted:

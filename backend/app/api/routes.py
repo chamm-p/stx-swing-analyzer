@@ -169,14 +169,33 @@ async def remove_from_watchlist(symbol: str, db: AsyncSession = Depends(get_db))
     return {"ok": True}
 
 
+@router.get("/digest/latest")
+async def latest_digest():
+    """Letzte Handelsempfehlung (Digest) — wird 2× täglich erzeugt,
+    ad hoc über Einstellungen → Jobs → ▶."""
+    import json as _json
+
+    from app.services_redis import get_redis
+
+    raw = await get_redis().get("digest:latest")
+    if not raw:
+        return {"available": False}
+    return {"available": True, **_json.loads(raw)}
+
+
 @router.get("/trading-rules")
-async def trading_rules():
-    """Goldene Swing-Regeln fürs UI (Positionsgrößen-Vorschlag im Kauf-Dialog)."""
+async def trading_rules(db: AsyncSession = Depends(get_db)):
+    """Goldene Swing-Regeln + aktive Champion-Strategie fürs UI."""
+    from app.analysis.scoring import load_champion
     from app.config import get_settings
 
     s = get_settings()
+    champion = await load_champion(db)
     return {"risk_per_trade_pct": s.risk_per_trade_pct,
-            "swing_min_crv": s.swing_min_crv}
+            "swing_min_crv": s.swing_min_crv,
+            "champion": champion or None,
+            "defaults": {"threshold": s.score_threshold,
+                         "target_atr_factor": 2.0, "stop_atr_factor": 1.5}}
 
 
 # ---------------------------------------------------------------- Signale

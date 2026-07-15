@@ -76,6 +76,7 @@ class SchedulerSettings(BaseModel):
     optimize_segments: str | None = None
     universe_refresh_days: str | None = None
     discovery_time: str | None = None
+    digest_times: str | None = None
 
 
 @router.get("/jobs")
@@ -126,11 +127,14 @@ async def put_scheduler(payload: SchedulerSettings, db: AsyncSession = Depends(g
         value = value.strip()
         if value == "":
             continue  # leer = zurück auf Env-Default
-        if field == "discovery_time":
+        if field in ("discovery_time", "digest_times"):
             import re
-            if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", value):
-                raise HTTPException(status_code=422,
-                                    detail="discovery_time muss HH:MM (UTC) sein")
+            parts = value.split(",") if field == "digest_times" else [value]
+            for part in parts:
+                if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", part.strip()):
+                    raise HTTPException(status_code=422,
+                                        detail=f"{field} muss HH:MM (UTC) sein, "
+                                               f"Komma-getrennt für mehrere Zeiten")
         elif field != "optimize_segments" and not value.lstrip("-").isdigit():
             raise HTTPException(status_code=422, detail=f"{field} muss eine Zahl sein")
     await save_settings(db, "scheduler", data)

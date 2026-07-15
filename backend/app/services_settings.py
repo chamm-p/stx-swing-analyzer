@@ -84,6 +84,7 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "optimize_segments": ("optimize_segments", False),
         "universe_refresh_days": ("universe_refresh_days", False),
         "discovery_time": ("discovery_time", False),
+        "digest_times": ("digest_times", False),
     },
 }
 

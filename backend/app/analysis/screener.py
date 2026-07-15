@@ -34,6 +34,8 @@ async def scan_universe(db: AsyncSession) -> int:
         return 0
 
     try:
+        from app.analysis.scoring import load_champion
+        await load_champion(db)
         result = await db.execute(
             select(UniverseSymbol).where(UniverseSymbol.active == True)  # noqa: E712
         )

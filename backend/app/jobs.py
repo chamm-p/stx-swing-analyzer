@@ -27,6 +27,8 @@ JOBS: dict[str, dict] = {
                       "setting": None, "unit": "min", "fixed": 60},
     "discovery": {"label": "Discovery-Breiten-Scan (US + XETRA)",
                   "setting": "discovery_time", "unit": "time"},
+    "digest": {"label": "Tägliche Handelsempfehlung (Kauf + Bestands-Review)",
+               "setting": "digest_times", "unit": "times"},
     "auto_optimize": {"label": "Segment-Auto-Optimierung (Walk-Forward)",
                       "setting": "optimize_interval_days", "unit": "days"},
     "refresh_universe": {"label": "Index-Mitgliedschaften aktualisieren",

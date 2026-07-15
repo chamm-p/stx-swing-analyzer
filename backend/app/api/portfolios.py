@@ -107,6 +107,38 @@ async def delete_platform(platform_id: int, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
+@router.post("/portfolios/{portfolio_id}/promote")
+async def promote_champion(portfolio_id: int, db: AsyncSession = Depends(get_db)):
+    """Challenger → Champion: bewährte Strategie-Parameter global in die
+    Live-Signallogik übernehmen (Screener, Pipeline, Discovery, Ziele).
+
+    Bewusst manuell — das System empfiehlt, der User approved."""
+    from app.analysis.scoring import set_champion
+    from app.models import AppSetting
+
+    pf = await db.get(Portfolio, portfolio_id)
+    if pf is None:
+        raise HTTPException(status_code=404, detail="Portfolio nicht gefunden")
+    strategy = (pf.config or {}).get("strategy") or {}
+    allowed = {"threshold", "target_atr_factor", "stop_atr_factor"}
+    new = {k: float(v) for k, v in strategy.items() if k in allowed and v is not None}
+    if not new:
+        raise HTTPException(status_code=422,
+                            detail="Portfolio hat keine Challenger-Strategie (config.strategy)")
+
+    row = await db.get(AppSetting, "strategy")
+    old = dict(row.value or {}) if row else {}
+    if row is None:
+        db.add(AppSetting(key="strategy", value=new))
+    else:
+        row.value = new
+    await db.commit()
+    set_champion(new)  # Backend-Prozess sofort; Worker zieht binnen 20s nach
+    logger.info("Champion befördert aus %s: %s (vorher: %s)", pf.name, new, old or "Defaults")
+    return {"promoted_from": pf.name, "old": old or None, "new": new,
+            "note": "Gilt ab sofort für Analysen/Screener; Worker übernimmt binnen 20 s."}
+
+
 def _position_dict(p: Position, current: float | None) -> dict:
     return {
         "id": str(p.id), "symbol": p.symbol, "quantity": p.quantity,

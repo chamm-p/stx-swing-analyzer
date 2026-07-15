@@ -55,7 +55,9 @@ type JobInfo = {
   next_run: string | null;
 };
 
-const UNIT_LABEL: Record<string, string> = { min: "Min", days: "Tage", time: "Uhr (UTC)" };
+const UNIT_LABEL: Record<string, string> = {
+  min: "Min", days: "Tage", time: "Uhr (UTC)", times: "Uhr (UTC, Komma-Liste)",
+};
 
 function JobsSection() {
   const [jobs, setJobs] = useState<JobInfo[]>([]);
@@ -147,7 +149,7 @@ function JobsSection() {
                       <input
                         value={edits[j.id] ?? j.interval}
                         onChange={(e) => setEdits((s) => ({ ...s, [j.id]: e.target.value }))}
-                        className="w-20 rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs"
+                        className={`${j.unit === "times" ? "w-28" : "w-20"} rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs`}
                         title={j.unit === "days" ? "0 = deaktiviert" : undefined}
                       />
                       <span className="text-xs text-slate-500">{UNIT_LABEL[j.unit]}</span>

@@ -148,8 +148,35 @@ def flip_suppressed(last_action: str | None, new_action: str, composite: float,
     return composite < -exit_level
 
 
+# ---------------------------------------------------------------- Champion
+# Global beförderte Strategie-Parameter (aus einem bewährten Challenger,
+# app_settings-Key "strategy"). Prozess-lokaler Cache; wird von den
+# Job-/Pipeline-Einstiegspunkten via load_champion() aufgefrischt.
+_champion: dict = {}
+
+
+def set_champion(overrides: dict | None) -> None:
+    global _champion
+    _champion = dict(overrides or {})
+
+
+def champion() -> dict:
+    return _champion
+
+
+async def load_champion(db) -> dict:
+    """Champion-Overrides aus der DB in den Prozess-Cache laden."""
+    from app.models import AppSetting
+
+    row = await db.get(AppSetting, "strategy")
+    set_champion(row.value if row else None)
+    return _champion
+
+
 def effective_threshold(profile: ScoringProfile) -> float:
     s = get_settings()
+    if not profile.use_crypto_threshold and _champion.get("threshold") is not None:
+        return float(_champion["threshold"])
     return s.score_threshold_crypto if profile.use_crypto_threshold else s.score_threshold
 
 

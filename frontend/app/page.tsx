@@ -14,10 +14,13 @@ type Dashboard = {
 
 export default function DashboardPage() {
   const [data, setData] = useState<Dashboard | null>(null);
+  const [digest, setDigest] = useState<{ text: string; ts: string } | null>(null);
+  const [showDigest, setShowDigest] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.get("/api/dashboard").then(setData).catch((e) => setError(e.message));
+    api.get("/api/digest/latest").then((d) => d.available && setDigest(d)).catch(() => {});
   }, []);
 
   if (error) return <p className="text-rose-400">Fehler: {error}</p>;
@@ -30,6 +33,23 @@ export default function DashboardPage() {
         <Stat label="News (24h)" value={data.news_last_24h} />
         <Stat label="Signale gesamt" value={data.recent_signals.length} />
       </div>
+
+      {digest && (
+        <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+          <button onClick={() => setShowDigest(!showDigest)} className="flex w-full items-center gap-2 text-sm">
+            <span className="font-semibold">📬 Letzte Handelsempfehlung</span>
+            <span className="text-xs text-slate-500">
+              {new Date(digest.ts).toLocaleString("de-DE")} — Kauf-Kandidaten + Bestands-Review (2× täglich)
+            </span>
+            <span className="ml-auto text-slate-500">{showDigest ? "▲" : "▼"}</span>
+          </button>
+          {showDigest && (
+            <pre className="mt-2 whitespace-pre-wrap border-t border-slate-800 pt-2 text-xs text-slate-300">
+              {digest.text}
+            </pre>
+          )}
+        </section>
+      )}
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">

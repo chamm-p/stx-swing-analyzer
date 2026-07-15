@@ -21,9 +21,19 @@ BASE_HORIZON_DAYS = 14
 
 
 def compute_price_targets(snapshot: dict, action: str, horizon_days: int,
-                          target_atr_factor: float = TARGET_ATR_FACTOR,
-                          stop_atr_factor: float = STOP_ATR_FACTOR) -> dict | None:
-    """Zielzone aus dem Indikator-Snapshot. None bei HOLD oder fehlenden Daten."""
+                          target_atr_factor: float | None = None,
+                          stop_atr_factor: float | None = None) -> dict | None:
+    """Zielzone aus dem Indikator-Snapshot. None bei HOLD oder fehlenden Daten.
+
+    Ohne explizite Faktoren gelten die Champion-Overrides (falls per
+    „Zum Champion machen" befördert), sonst die Defaults."""
+    if target_atr_factor is None or stop_atr_factor is None:
+        from app.analysis.scoring import champion
+        ch = champion()
+        if target_atr_factor is None:
+            target_atr_factor = float(ch.get("target_atr_factor", TARGET_ATR_FACTOR))
+        if stop_atr_factor is None:
+            stop_atr_factor = float(ch.get("stop_atr_factor", STOP_ATR_FACTOR))
     close = snapshot.get("close")
     atr = snapshot.get("atr14")
     if action not in ("BUY", "SELL") or not close or not atr or atr <= 0:
