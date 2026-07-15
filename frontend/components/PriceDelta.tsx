@@ -50,15 +50,20 @@ export default function PriceDelta({
   const val = showSeven ? d7 : d1;
   const label = showSeven ? "7T" : "1T";
 
+  // Feste Mindestbreite, damit die Tabelle beim 1T/7T-Wechsel nicht
+  // springt (Werte sind unterschiedlich breit: "+0.5%" vs. "−11.15%").
+  const base = "inline-block min-w-[4.75rem] whitespace-nowrap tabular-nums ";
+
   if (val == null) {
-    return <span className={"text-slate-600 tabular-nums " + className}>—</span>;
+    return <span className={base + "text-slate-600 " + className}>—</span>;
   }
   const up = val >= 0;
   return (
     <span
       className={
+        base +
         (up ? "text-emerald-400" : "text-rose-400") +
-        " tabular-nums transition-colors " +
+        " transition-colors " +
         className
       }
       title={showSeven ? "Kursänderung 7 Tage" : "Kursänderung Vortag"}
