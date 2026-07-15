@@ -289,7 +289,7 @@ export default function TopSignalsPage() {
                   </td>
                   <td className="px-3 py-2 text-slate-400">{r.snapshot?.rsi14?.toFixed(0) ?? "—"}</td>
                   <td className="px-3 py-2">{r.close ?? "—"}</td>
-                  <td className="px-3 py-2 text-slate-400">
+                  <td className="whitespace-nowrap px-3 py-2 text-slate-400">
                     {r.snapshot?.target_price ? (
                       <span title={r.snapshot.risk_reward ? `CRV 1:${r.snapshot.risk_reward}` : undefined}>
                         <span className="text-emerald-400">{r.snapshot.target_price.toFixed(2)}</span>
@@ -303,20 +303,22 @@ export default function TopSignalsPage() {
                     {rowStatus[r.symbol] ? (
                       <span className="mr-2 text-xs text-amber-400">{rowStatus[r.symbol]}</span>
                     ) : null}
-                    {/* Feste Breite + zentriert — die drei Buttons fluchten über alle Zeilen */}
-                    <span className="inline-flex gap-1.5">
+                    {/* Icon-Buttons mit fester Breite — fluchten über alle Zeilen */}
+                    <span className="inline-flex gap-1">
                       <button onClick={() => analyze(r.symbol)}
-                        className="w-24 rounded border border-slate-700 px-2 py-1 text-center text-xs text-slate-300 hover:border-amber-500"
-                        title="Zur Watchlist + sofortige Voll-Analyse (Indikatoren, LLM, Scoring)">
-                        ⚡ Analyse
+                        className="w-8 rounded border border-slate-700 py-1 text-center text-sm hover:border-amber-500"
+                        title="Sofortige Voll-Analyse (Indikatoren, LLM, Scoring) — ohne Watchlist-Aufnahme">
+                        ⚡
                       </button>
                       <button onClick={() => toWatchlist(r.symbol)}
-                        className="w-24 rounded border border-slate-700 px-2 py-1 text-center text-xs text-slate-300 hover:border-sky-500">
-                        → Watchlist
+                        className="w-8 rounded border border-slate-700 py-1 text-center text-sm hover:border-sky-500"
+                        title="Zur Watchlist hinzufügen (beobachten)">
+                        👁️
                       </button>
                       <button onClick={() => toPortfolio(r)}
-                        className="w-24 rounded border border-slate-700 px-2 py-1 text-center text-xs text-slate-300 hover:border-emerald-500">
-                        → Portfolio
+                        className="w-8 rounded border border-slate-700 py-1 text-center text-sm hover:border-emerald-500"
+                        title="In Portfolio kaufen (Kauf-Dialog)">
+                        💰
                       </button>
                     </span>
                   </td>
