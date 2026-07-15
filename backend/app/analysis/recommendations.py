@@ -156,13 +156,17 @@ def render_digest(d: dict) -> str:
         lines.append(f"(Stückzahlen: 1%-Regel auf „{d['reference_portfolio']}“, "
                      f"Wert {d.get('portfolio_value')})")
 
+    def num(v) -> str:
+        return f"{v:,.2f}".replace(",", "'") if isinstance(v, (int, float)) else "—"
+
     def fmt_buy(b: dict) -> str:
         meta = b.get("confidence")
-        head = (f"• {b['symbol']} @ {b.get('price')}"
+        head = (f"• {b['symbol']} @ {num(b.get('price'))}"
                 + (f" ({round(meta * 100)}%)" if meta else f" (Score {b.get('score')})"))
-        tz = f" Ziel {b.get('target')} / Stop {b.get('stop')}" if b.get("target") else ""
+        tz = (f" Ziel {num(b.get('target'))} / Stop {num(b.get('stop'))}"
+              if b.get("target") else "")
         size = b.get("sizing")
-        sz = f" → Vorschlag {size['quantity']} Stk. (~{size['volume']})" if size else ""
+        sz = f" → Vorschlag {size['quantity']} Stk. (~{num(size['volume'])})" if size else ""
         return head + tz + sz
 
     lines.append("")
@@ -180,10 +184,10 @@ def render_digest(d: dict) -> str:
     for r in sells + checks:
         icon = "🔴" if r["verdict"] == "VERKAUFEN" else "🟡"
         lines.append(f"{icon} {r['verdict']}: {r['symbol']} ({r['portfolio']}) "
-                     f"@ {r['price']} ({r['pnl_pct']:+.1f}%) — {r['reason']}")
+                     f"@ {num(r['price'])} ({r['pnl_pct']:+.1f}%) — {r['reason']}")
     for r in holds:
         lines.append(f"⚪ HALTEN: {r['symbol']} ({r['portfolio']}) "
-                     f"@ {r['price']} ({r['pnl_pct']:+.1f}%)")
+                     f"@ {num(r['price'])} ({r['pnl_pct']:+.1f}%)")
     return "\n".join(lines)
 
 
