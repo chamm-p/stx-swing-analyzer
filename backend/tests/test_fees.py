@@ -67,3 +67,10 @@ def test_ibkr_tiered_us():
 
 def test_per_share_ohne_stueckzahl_greift_minimum():
     assert compute_fee(_IBKR_FIXED, "USD", 5000) == 1.0
+
+
+def test_ibkr_default_spiegelt_usd():
+    # Unbekannte Währung (z.B. fehlende Stammdaten) → US-Modell, nicht EUR
+    assert compute_fee(_IBKR_FIXED, "GBP", 5000, quantity=100) == \
+        compute_fee(_IBKR_FIXED, "USD", 5000, quantity=100)
+    assert compute_fee(_IBKR_TIERED, None, 50000, quantity=1000) == 3.5

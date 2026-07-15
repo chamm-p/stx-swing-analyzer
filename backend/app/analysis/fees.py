@@ -88,17 +88,20 @@ _SWISSQUOTE_EUR = [{"up_to": 500, "fee": 5.0}] + _SWISSQUOTE_DEFAULT[1:]
 # prüfbar/anpassbar). Tiered enthält zusätzlich variable Börsen-/
 # Regulierungsgebühren, die hier bewusst NICHT modelliert sind — die
 # echte Tiered-Gebühr liegt daher etwas höher.
+# Kommissionen fallen je Börse in der Handelswährung an (US → USD pro
+# Aktie, XETRA → EUR prozentual, SIX → CHF). "default" spiegelt USD:
+# Assets ohne bekannte Währung sind in diesem Universum fast immer US.
 _IBKR_FIXED = {
     "USD": [{"up_to": None, "per_share": 0.005, "min": 1.0, "max_pct": 0.01}],
     "EUR": [{"up_to": None, "pct": 0.0005, "min": 1.25, "max": 29.0}],
     "CHF": [{"up_to": None, "pct": 0.0005, "min": 1.5}],
-    "default": [{"up_to": None, "pct": 0.0005, "min": 1.25}],
+    "default": [{"up_to": None, "per_share": 0.005, "min": 1.0, "max_pct": 0.01}],
 }
 _IBKR_TIERED = {
     "USD": [{"up_to": None, "per_share": 0.0035, "min": 0.35, "max_pct": 0.005}],
     "EUR": [{"up_to": None, "pct": 0.0005, "min": 1.25, "max": 29.0}],
     "CHF": [{"up_to": None, "pct": 0.0005, "min": 1.5}],
-    "default": [{"up_to": None, "pct": 0.0005, "min": 1.25}],
+    "default": [{"up_to": None, "per_share": 0.0035, "min": 0.35, "max_pct": 0.005}],
 }
 
 
