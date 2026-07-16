@@ -79,9 +79,25 @@ services:
       TWS_PASSWORD: ${IBKR_PASSWORD:-}
       TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
       READ_ONLY_API: ${IBKR_READ_ONLY_API:-no}
+      # Vollständige, vom Image empfohlene Konfiguration — verhindert
+      # hängende GUI-Dialoge (API-Verbindungen automatisch annehmen,
+      # bestehende Sessions übernehmen, Warnungen bestätigen)
+      TWS_ACCEPT_INCOMING: accept
+      EXISTING_SESSION_DETECTED_ACTION: primary
+      BYPASS_WARNING: 'yes'
+      TWS_SETTINGS_PATH: /home/ibgateway/tws_settings
+      SAVE_TWS_SETTINGS: ${IBKR_SAVE_SETTINGS:-}
       TWOFA_TIMEOUT_ACTION: restart
       AUTO_RESTART_TIME: 11:59 PM
       TIME_ZONE: Europe/Zurich
+      # VNC nur aktiv, wenn IBKR_VNC_PASSWORD gesetzt ist — zum visuellen
+      # Debuggen des Gateway-Fensters
+      VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
+    volumes:
+      - ib_settings:/home/ibgateway/tws_settings
+    ports:
+      # nur an localhost des Servers — für VNC per SSH-Tunnel (Debugging)
+      - "127.0.0.1:5900:5900"
 
   frontend:
     build: ./frontend
@@ -96,3 +112,4 @@ services:
 volumes:
   db_data:
   redis_data:
+  ib_settings:
