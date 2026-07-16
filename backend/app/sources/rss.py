@@ -13,10 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Asset, DataSource, NewsArticle, WatchlistItem, utcnow
 from app.sources.base import with_retry
 
-# Reddit & Co. blocken generische Bot-UAs — beschreibende Kennung nach
-# Reddit-Konvention ("platform:app:version") senkt die 429-Quote deutlich.
+# Reddits Bot-Wall lässt nur UAs mit der alten API-Konvention inklusive
+# "(by /u/<name>)" durch — empirisch verifiziert: exakt dieselbe Anfrage
+# bekommt ohne das Muster 429, mit dem Muster 200. Auch ein voller
+# Chrome-UA wird geblockt; entscheidend ist die /u/-Referenz.
 _FEED_HEADERS = {
-    "User-Agent": "web:stx-swing-analyzer:v1.0 (self-hosted single-user RSS reader)",
+    "User-Agent": "stx-swing-analyzer/1.0 (self-hosted single-user RSS reader; "
+                  "by /u/stx-swing-analyzer)",
     "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8",
 }
 
