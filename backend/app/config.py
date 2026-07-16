@@ -85,13 +85,16 @@ class Settings(BaseSettings):
     retention_ohlcv_days: int = 730
     retention_news_days: int = 365
 
-    # IBKR: die App spricht nur den API-Socket des ib-gateway-Containers
-    # an (Docker-intern); IBKR-Zugangsdaten liegen als Env beim Gateway.
-    ibkr_host: str = "ib-gateway"
-    ibkr_port: int = 4004          # 4004 = Paper, 4003 = Live
-    ibkr_client_id: int = 17
-    ibkr_account: str = ""         # leer = Default-Konto der Session
+    # IBKR Web-API (OAuth 1.0a, headless — kein Gateway): Consumer-Key +
+    # Access-Token aus dem IBKR-Self-Service-OAuth-Portal; private
+    # Schlüssel (private_signature.pem, private_encryption.pem,
+    # dhparam.pem) liegen unter ibkr_keys_dir (Volume ./secrets/ibkr).
+    ibkr_account: str = ""         # leer = erstes Konto der Session
     ibkr_trading_enabled: bool = False  # Orders nur nach explizitem Opt-in
+    ibkr_consumer_key: str = ""
+    ibkr_access_token: str = ""
+    ibkr_access_token_secret: str = ""
+    ibkr_keys_dir: str = "/srv/ibkr_keys"
     ibkr_sync_interval_min: int = 60    # Bestands-Sync verknüpfter Portfolios
 
     # Reddit-API (reddit.com/prefs/apps, Typ "script") — Reddit filtert

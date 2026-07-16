@@ -30,13 +30,28 @@ def test_crv():
 # ------------------------------------------------------- IBKR-Symbol-Mapping
 
 def test_ibkr_yahoo_symbol_mapping():
-    from types import SimpleNamespace
-
     from app.broker.ibkr_sync import yahoo_symbol
 
-    stk = lambda **kw: SimpleNamespace(secType="STK", primaryExchange="", **kw)
-    assert yahoo_symbol(stk(symbol="AAPL", currency="USD")) == "AAPL"
-    assert yahoo_symbol(stk(symbol="BRK B", currency="USD")) == "BRK-B"
-    assert yahoo_symbol(stk(symbol="SAP", currency="EUR")) == "SAP.DE"
-    assert yahoo_symbol(SimpleNamespace(secType="OPT", symbol="AAPL",
-                                        currency="USD", primaryExchange="")) is None
+    assert yahoo_symbol("AAPL", "USD", "STK") == "AAPL"
+    assert yahoo_symbol("BRK B", "USD", "STK") == "BRK-B"
+    assert yahoo_symbol("SAP", "EUR", "STK") == "SAP.DE"
+    assert yahoo_symbol("AAPL", "USD", "OPT") is None  # keine Optionen
+    assert yahoo_symbol("NESN", "CHF", "STK") is None  # SIX nicht gemappt
+
+
+def test_dh_prime_parser(tmp_path):
+    """dhparam.pem (ASN.1 SEQUENCE {prime, generator}) → Hex-Prime."""
+    import base64
+
+    from app.broker.ibkr import dh_prime_from_pem
+
+    prime = (1 << 255) + 977  # irgendein grosser Wert mit fuehrendem High-Bit-Byte
+    pbytes = prime.to_bytes(33, "big")  # 0x00-Padding wie DER es verlangt
+    inner = b"\x02" + bytes([len(pbytes)]) + pbytes + b"\x02\x01\x02"
+    der = b"\x30" + bytes([len(inner)]) + inner
+    pem = ("-----BEGIN DH PARAMETERS-----\n"
+           + base64.b64encode(der).decode()
+           + "\n-----END DH PARAMETERS-----\n")
+    f = tmp_path / "dhparam.pem"
+    f.write_text(pem)
+    assert dh_prime_from_pem(str(f)) == format(prime, "x")

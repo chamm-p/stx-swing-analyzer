@@ -17,4 +17,4 @@ pandas==3.0.3
 lxml==6.0.2
 cryptography==49.0.0
 mcp==1.28.1
-ib_async==2.1.0
+ibind[oauth]==0.1.23

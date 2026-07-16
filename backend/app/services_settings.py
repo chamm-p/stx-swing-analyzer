@@ -77,13 +77,13 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "canton": ("tax_canton", False),
         "tin": ("tax_tin", False),
     },
-    # IBKR-API-Zugang (Gateway-Socket; Zugangsdaten liegen beim Gateway)
+    # IBKR Web-API (OAuth 1.0a — Self-Service-Portal-Zugangsdaten)
     "ibkr": {
-        "host": ("ibkr_host", False),
-        "port": ("ibkr_port", False),
-        "client_id": ("ibkr_client_id", False),
         "account": ("ibkr_account", False),
         "trading_enabled": ("ibkr_trading_enabled", False),
+        "consumer_key": ("ibkr_consumer_key", False),
+        "access_token": ("ibkr_access_token", False),
+        "access_token_secret": ("ibkr_access_token_secret", True),
     },
     # Job-Intervalle — der Worker-Tick gleicht laufend mit dem APScheduler
     # ab (Änderungen greifen ohne Neustart, ≤ 20s)

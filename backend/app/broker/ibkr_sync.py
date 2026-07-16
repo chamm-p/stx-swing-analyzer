@@ -1,6 +1,6 @@
 """IBKR-Portfolio-Sync: echte IBKR-Bestände in ein App-Portfolio spiegeln.
 
-Read-only über das Gateway (funktioniert auch ohne „Orders erlauben").
+Read-only über die Web-API (funktioniert auch ohne „Orders erlauben").
 Abgleich je verknüpftem Portfolio (config.ibkr_sync = true, kind=real):
 
 - Neue IBKR-Position       → App-Position mit echtem Einstand (avgCost,
@@ -24,42 +24,36 @@ from app.models import Portfolio, Position, utcnow
 logger = logging.getLogger(__name__)
 
 
-def yahoo_symbol(contract) -> str | None:
-    """IBKR-Kontrakt → Yahoo-Notation (Umkehrung von contract_for)."""
-    sym = (contract.symbol or "").upper().strip()
-    if not sym or contract.secType != "STK":
+def yahoo_symbol(ticker: str | None, currency: str | None,
+                 asset_class: str | None) -> str | None:
+    """IBKR-Positionsdaten (Web-API) → Yahoo-Notation."""
+    sym = (ticker or "").upper().strip()
+    if not sym or (asset_class or "STK") != "STK":
         return None
-    if contract.currency == "EUR":
+    if currency == "EUR":
         return sym + ".DE"  # XETRA/IBIS
-    if contract.currency == "USD":
+    if currency == "USD":
         return sym.replace(" ", "-")  # BRK B → BRK-B
-    logger.info("IBKR-Sync: %s (%s/%s) nicht gemappt",
-                sym, contract.currency, contract.primaryExchange)
+    logger.info("IBKR-Sync: %s (%s) nicht gemappt", sym, currency)
     return None
 
 
 async def fetch_ibkr_state(db: AsyncSession) -> dict:
-    """Positionen + Cash read-only vom Gateway lesen."""
-    from app.broker.ibkr import _conn_lock, _connect, ibkr_config
+    """Positionen + Cash read-only über die Web-API lesen."""
+    from app.broker.ibkr import status
 
-    cfg = await ibkr_config(db)
-    async with _conn_lock:
-        ib = await _connect(cfg)
-        try:
-            account = str(cfg.get("account") or "") or ""
-            positions = {}
-            for p in ib.positions(account):
-                sym = yahoo_symbol(p.contract)
-                if sym and p.position:
-                    # avgCost ist der Einstand PRO STÜCK inkl. Kommission
-                    positions[sym] = {"quantity": float(p.position),
-                                      "avg_cost": round(float(p.avgCost), 4)}
-            summary = await ib.accountSummaryAsync(account)
-            cash = next((float(r.value) for r in summary
-                         if r.tag == "TotalCashValue"), None)
-            return {"positions": positions, "cash": cash}
-        finally:
-            ib.disconnect()
+    st = await status(db)
+    positions: dict = {}
+    for p in st.get("positions") or []:
+        sym = yahoo_symbol(p.get("symbol"), p.get("currency"), p.get("asset_class"))
+        if sym and p.get("quantity"):
+            # avgCost ist der Einstand PRO STÜCK inkl. Kommission
+            positions[sym] = {"quantity": float(p["quantity"]),
+                              "avg_cost": float(p.get("avg_cost") or 0)}
+    cash_entry = (st.get("summary") or {}).get("TotalCashValue") or {}
+    cash = cash_entry.get("value")
+    return {"positions": positions,
+            "cash": float(cash) if cash is not None else None}
 
 
 async def _reconcile(db: AsyncSession, pf: Portfolio, state: dict) -> dict:

@@ -211,11 +211,13 @@ function IbkrSection() {
     setMsg(null);
     try {
       const saved = await api.put("/api/settings/ibkr", {
-        host: String(cfg!.host ?? ""), port: String(cfg!.port ?? ""),
-        client_id: String(cfg!.client_id ?? ""), account: String(cfg!.account ?? ""),
+        account: String(cfg!.account ?? ""),
+        consumer_key: String(cfg!.consumer_key ?? ""),
+        access_token: String(cfg!.access_token ?? ""),
+        access_token_secret: cfg!.access_token_secret || undefined,
         trading_enabled: String(cfg!.trading_enabled ?? "false"),
       });
-      setCfg(saved);
+      setCfg({ ...saved, access_token_secret: "" });
       setMsg("✅ Gespeichert.");
     } catch (e: any) {
       setMsg(e.message);
@@ -245,20 +247,30 @@ function IbkrSection() {
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
-      <h2 className="mb-1 font-semibold">🏦 IBKR (Interactive Brokers)</h2>
+      <h2 className="mb-1 font-semibold">🏦 IBKR (Web-API, OAuth)</h2>
       <p className="mb-3 text-xs text-slate-500">
-        Die App spricht das <code>ib-gateway</code> (Docker-intern) an. Gateway aktivieren:{" "}
-        <code>COMPOSE_PROFILES=ibkr</code> plus <code>IBKR_USERID</code>/<code>IBKR_PASSWORD</code> in
-        der <code>.env</code> — die Zugangsdaten bleiben beim Gateway-Container und erreichen die App nie.
-        Port 4004 = Paper-Konto, 4003 = Live.
+        Headless über die IBKR-Web-API — kein Gateway. Einrichtung im IBKR-Self-Service-OAuth-Portal;
+        die privaten Schlüssel (<code>private_signature.pem</code>, <code>private_encryption.pem</code>,{" "}
+        <code>dhparam.pem</code>) liegen auf dem Server unter <code>secrets/ibkr/</code>.
+        Neue Consumer-Keys aktiviert IBKR erst beim Wochenend-Neustart.
       </p>
+      {Array.isArray(cfg.missing) && cfg.missing.length > 0 && (
+        <p className="mb-3 rounded border border-amber-900/60 bg-amber-950/20 p-2 text-xs text-amber-400">
+          ⚠️ Noch unvollständig: {cfg.missing.join(", ")}
+        </p>
+      )}
       <FieldGrid>
-        {field("host", "Host")}
-        {field("port", "Port", "4004 Paper · 4003 Live")}
-        {field("client_id", "Client-ID", "Beliebige freie ID (die TWS-API erlaubt keine Doppelnutzung)")}
-        {field("account", "Konto (optional)", "leer = Default-Konto der Session")}
+        {field("consumer_key", "Consumer-Key", "9 Zeichen, im OAuth-Portal selbst vergeben")}
+        {field("access_token", "Access-Token", "aus dem OAuth-Portal (Generate Token)")}
+        <Field label={`Access-Token-Secret ${cfg.has_access_token_secret ? "(gespeichert — leer = behalten)" : ""}`}>
+          <input type="password" value={cfg.access_token_secret ?? ""}
+            placeholder={cfg.has_access_token_secret ? "••••••••" : ""}
+            onChange={(e) => setCfg({ ...cfg, access_token_secret: e.target.value })}
+            className={inputCls} />
+        </Field>
+        {field("account", "Konto-ID (optional)", "z.B. U1234567 bzw. DU… für Paper; leer = erstes Konto")}
         <label className="flex items-center gap-2 self-end pb-2 text-xs"
-          title="Ohne Haken ist die Verbindung strikt read-only — kein Endpoint kann Orders senden">
+          title="Ohne Haken ist die Verbindung faktisch read-only — kein Endpoint kann Orders senden">
           <input type="checkbox" checked={tradingOn}
             onChange={(e) => setCfg({ ...cfg, trading_enabled: e.target.checked ? "true" : "false" })} />
           <span className={tradingOn ? "font-semibold text-amber-400" : "text-slate-400"}>
@@ -279,12 +291,12 @@ function IbkrSection() {
       {testResult && (
         <div className="mt-3 rounded border border-emerald-900/60 bg-emerald-950/20 p-3 text-xs">
           <div className="mb-1 font-semibold text-emerald-400">
-            ✅ Verbunden (Server v{testResult.server_version}) · Konten: {testResult.accounts?.join(", ") || "—"}
+            ✅ Verbunden ({testResult.api || "IBKR"}) · Konten: {testResult.accounts?.join(", ") || "—"}
             {testResult.trading_enabled ? " · Trading AKTIV ⚠️" : " · read-only"}
           </div>
           <div className="flex flex-wrap gap-4 text-slate-300">
-            {Object.entries(testResult.summary || {}).map(([tag, v]: any) => (
-              <span key={tag}>{tag}: <b>{Number(v.value).toLocaleString("de-DE")} {v.currency}</b></span>
+            {Object.entries(testResult.summary || {}).filter(([, v]: any) => v?.value != null).map(([tag, v]: any) => (
+              <span key={tag}>{tag}: <b>{Number(v.value).toLocaleString("de-DE")} {v.currency || ""}</b></span>
             ))}
           </div>
           {testResult.positions?.length > 0 && (

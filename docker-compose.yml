@@ -33,6 +33,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-stx}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-stx}
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      # Private OAuth-Schluessel fuer die IBKR-Web-API (nie im Git)
+      - ./secrets/ibkr:/srv/ibkr_keys:ro
     depends_on:
       db:
         condition: service_healthy
@@ -47,6 +50,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-stx}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-stx}
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./secrets/ibkr:/srv/ibkr_keys:ro
     depends_on:
       db:
         condition: service_healthy
@@ -66,39 +71,6 @@ services:
     # Täglicher pg_dump, 14 Tage Aufbewahrung
     entrypoint: ["sh", "-c", "while true; do if pg_dump -h db -U ${POSTGRES_USER:-stx} -d ${POSTGRES_DB:-stx} -F c -f /backups/stx-$$(date +%F).dump; then echo \"Backup OK: stx-$$(date +%F).dump\"; else echo 'Backup FEHLGESCHLAGEN'; fi; find /backups -name 'stx-*.dump' -mtime +14 -delete; sleep 86400; done"]
 
-  # IBKR-Gateway (optional): startet nur mit COMPOSE_PROFILES=ibkr in der
-  # .env. Haelt die IBKR-Session (Auto-Login via IBC); die App verbindet
-  # sich Docker-intern mit dem API-Socket (4004 Paper / 4003 Live) —
-  # bewusst KEINE ports nach aussen.
-  ib-gateway:
-    image: ghcr.io/gnzsnz/ib-gateway:stable
-    restart: unless-stopped
-    profiles: ["ibkr"]
-    environment:
-      TWS_USERID: ${IBKR_USERID:-}
-      TWS_PASSWORD: ${IBKR_PASSWORD:-}
-      TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
-      READ_ONLY_API: ${IBKR_READ_ONLY_API:-no}
-      # Vollständige, vom Image empfohlene Konfiguration — verhindert
-      # hängende GUI-Dialoge (API-Verbindungen automatisch annehmen,
-      # bestehende Sessions übernehmen, Warnungen bestätigen)
-      TWS_ACCEPT_INCOMING: accept
-      EXISTING_SESSION_DETECTED_ACTION: primary
-      BYPASS_WARNING: 'yes'
-      TWS_SETTINGS_PATH: /home/ibgateway/tws_settings
-      SAVE_TWS_SETTINGS: ${IBKR_SAVE_SETTINGS:-}
-      TWOFA_TIMEOUT_ACTION: restart
-      AUTO_RESTART_TIME: 11:59 PM
-      TIME_ZONE: Europe/Zurich
-      # VNC nur aktiv, wenn IBKR_VNC_PASSWORD gesetzt ist — zum visuellen
-      # Debuggen des Gateway-Fensters
-      VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
-    volumes:
-      - ib_settings:/home/ibgateway/tws_settings
-    ports:
-      # nur an localhost des Servers — für VNC per SSH-Tunnel (Debugging)
-      - "127.0.0.1:5900:5900"
-
   frontend:
     build: ./frontend
     restart: unless-stopped
@@ -112,4 +84,3 @@ services:
 volumes:
   db_data:
   redis_data:
-  ib_settings:

@@ -18,10 +18,10 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
 
 
 class IbkrSettings(BaseModel):
-    host: str | None = None
-    port: str | None = None
-    client_id: str | None = None
     account: str | None = None
+    consumer_key: str | None = None
+    access_token: str | None = None
+    access_token_secret: str | None = None  # leer = Bestand behalten
     trading_enabled: str | None = None  # "true"/"false"
 
 
@@ -47,30 +47,34 @@ async def ibkr_status(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         logger.warning("IBKR-Status fehlgeschlagen: %s", e)
         raise HTTPException(status_code=502, detail=(
-            f"IBKR-Gateway nicht erreichbar: {e} — läuft der ib-gateway-Container "
-            "(COMPOSE_PROFILES=ibkr, IBKR_USERID/IBKR_PASSWORD in der .env)?"))
+            f"IBKR-Web-API nicht erreichbar: {e} — OAuth-Zugangsdaten in den "
+            "Einstellungen und Schlüsseldateien unter secrets/ibkr prüfen. "
+            "Hinweis: Neue Consumer-Keys aktiviert IBKR erst beim "
+            "Wochenend-Neustart."))
 
 
 @router.put("/settings/ibkr")
 async def put_ibkr(payload: IbkrSettings, db: AsyncSession = Depends(get_db)):
-    from app.services_settings import load_settings, save_settings
+    from app.services_settings import public_view, save_settings
 
     data = payload.model_dump(exclude_none=True)
-    for field in ("port", "client_id"):
-        value = (data.get(field) or "").strip()
-        if value and not value.isdigit():
-            raise HTTPException(status_code=422, detail=f"{field} muss eine Zahl sein")
     if "trading_enabled" in data and data["trading_enabled"].strip().lower() not in (
             "", "true", "false"):
         raise HTTPException(status_code=422, detail="trading_enabled muss true/false sein")
     await save_settings(db, "ibkr", data)
-    return await load_settings(db, "ibkr")
+    return await public_view(db, "ibkr")
 
 
 @router.get("/settings/ibkr")
 async def get_ibkr(db: AsyncSession = Depends(get_db)):
-    from app.services_settings import load_settings
-    return await load_settings(db, "ibkr")
+    """OAuth-Status inkl. Schlüsseldatei-Check (Secret bleibt write-only)."""
+    from app.broker.ibkr import _missing_config
+    from app.services_settings import load_settings, public_view
+
+    view = await public_view(db, "ibkr")
+    cfg = await load_settings(db, "ibkr")
+    view["missing"] = _missing_config(cfg)
+    return view
 
 
 @router.post("/broker/ibkr/order")

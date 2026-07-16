@@ -1,19 +1,26 @@
-"""IBKR-Anbindung über das IB Gateway (TWS-API, ib_async).
+"""IBKR-Anbindung über die Client-Portal-Web-API (REST, OAuth 1.0a).
 
-Architektur: Das Gateway (Docker-Service ``ib-gateway``) hält die
-IBKR-Session — Zugangsdaten liegen als Env beim Gateway-Container, NICHT
-in der App. Die App verbindet sich nur mit dem API-Socket (Docker-intern,
-Port 4004 Paper / 4003 Live) und ist per Default read-only: Orders gehen
-erst raus, wenn ``trading_enabled`` in den Settings aktiv ist UND der
-Aufruf explizit bestätigt wurde.
+Headless und Gateway-los: Die App signiert Requests direkt gegen
+api.ibkr.com (ibind-Bibliothek). Einmalige Einrichtung im IBKR-
+Self-Service-OAuth-Portal: RSA-Schlüsselpaare + DH-Params erzeugen,
+öffentliche Schlüssel hochladen, Consumer-Key + Access-Token in den
+App-Einstellungen hinterlegen. Die privaten Schlüssel liegen als PEM
+unter ``settings.ibkr_keys_dir`` (Volume, nie im Git).
 
-Verbindungen sind kurzlebig (connect → Aktion → disconnect) und
-serialisiert — die TWS-API mag keine parallelen Sessions mit derselben
-Client-ID.
+Sicherheitsmodell unverändert: Orders nur mit ``trading_enabled`` in
+den Settings UND explizitem confirm im Request; sonst ist die
+Verbindung faktisch read-only (wir rufen nur Portfolio-Endpunkte).
+
+ibind ist synchron (requests) → alle Aufrufe laufen im Thread-Executor.
 """
 
 import asyncio
+import base64
 import logging
+import re
+import time
+import uuid
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,68 +34,184 @@ async def ibkr_config(db: AsyncSession) -> dict:
     return await load_settings(db, "ibkr")
 
 
-def contract_for(symbol: str, currency: str | None = None):
-    """Yahoo-Symbol → IBKR-Kontrakt. Deckt US (SMART/USD, Klassen-Suffix
-    mit Leerzeichen: BRK-B → 'BRK B') und XETRA (.DE → SMART/EUR, IBIS) ab."""
-    from ib_async import Stock
-
-    sym = symbol.upper().strip()
-    if sym.endswith("-USD"):
-        raise ValueError("Krypto-Orders laufen nicht über das Aktien-Gateway "
-                         f"({sym}) — bitte direkt bei der Börse handeln")
-    if sym.endswith(".DE"):
-        return Stock(sym[:-3], "SMART", "EUR", primaryExchange="IBIS")
-    if "." in sym:
-        raise ValueError(f"Börsen-Suffix {sym} ist noch nicht gemappt — "
-                         "bitte Symbol/Exchange prüfen")
-    return Stock(sym.replace("-", " "), "SMART", currency or "USD")
-
-
-async def _connect(cfg: dict):
-    from ib_async import IB
-
-    ib = IB()
-    await ib.connectAsync(
-        host=str(cfg.get("host") or "ib-gateway"),
-        port=int(cfg.get("port") or 4004),
-        clientId=int(cfg.get("client_id") or 17),
-        timeout=10,
-        readonly=not _trading_enabled(cfg),
-    )
-    return ib
-
-
 def _trading_enabled(cfg: dict) -> bool:
     return str(cfg.get("trading_enabled") or "").strip().lower() in ("1", "true", "yes", "ja")
 
 
-async def status(db: AsyncSession) -> dict:
-    """Verbindungstest + Konto-Überblick + offene IBKR-Positionen."""
-    cfg = await ibkr_config(db)
+def dh_prime_from_pem(path: str) -> str:
+    """DH-Prime (hex) aus dhparam.pem — minimaler DER-Parser.
+
+    dhparam ist ASN.1: SEQUENCE { prime INTEGER, generator INTEGER }."""
+    body = re.sub(r"-----[A-Z ]+-----|\s", "", Path(path).read_text())
+    der = base64.b64decode(body)
+
+    def read_len(buf: bytes, i: int) -> tuple[int, int]:
+        first = buf[i]
+        if first < 0x80:
+            return first, i + 1
+        n = first & 0x7F
+        return int.from_bytes(buf[i + 1:i + 1 + n], "big"), i + 1 + n
+
+    if der[0] != 0x30:
+        raise ValueError("dhparam.pem: kein ASN.1-SEQUENCE")
+    _, i = read_len(der, 1)
+    if der[i] != 0x02:
+        raise ValueError("dhparam.pem: Prime-INTEGER nicht gefunden")
+    plen, i = read_len(der, i + 1)
+    prime = der[i:i + plen].lstrip(b"\x00")
+    return prime.hex()
+
+
+def _missing_config(cfg: dict) -> list[str]:
+    from app.config import get_settings
+
+    keys_dir = Path(get_settings().ibkr_keys_dir)
+    missing = [k for k in ("consumer_key", "access_token", "access_token_secret")
+               if not str(cfg.get(k) or "").strip()]
+    for fname in ("private_signature.pem", "private_encryption.pem", "dhparam.pem"):
+        if not (keys_dir / fname).exists():
+            missing.append(str(keys_dir / fname))
+    return missing
+
+
+def _make_client(cfg: dict):
+    """IbkrClient mit OAuth-Konfiguration (synchron aufzurufen)."""
+    from ibind import IbkrClient
+    from ibind.oauth.oauth1a import OAuth1aConfig
+
+    from app.config import get_settings
+
+    keys_dir = Path(get_settings().ibkr_keys_dir)
+    oauth = OAuth1aConfig(
+        access_token=str(cfg["access_token"]).strip(),
+        access_token_secret=str(cfg["access_token_secret"]).strip(),
+        consumer_key=str(cfg["consumer_key"]).strip(),
+        dh_prime=dh_prime_from_pem(str(keys_dir / "dhparam.pem")),
+        encryption_key_fp=str(keys_dir / "private_encryption.pem"),
+        signature_key_fp=str(keys_dir / "private_signature.pem"),
+        # Kein Hintergrund-Tickler: Client lebt nur für einen Aufruf
+        maintain_oauth=False,
+        shutdown_oauth=False,
+    )
+    return IbkrClient(
+        account_id=str(cfg.get("account") or "").strip() or None,
+        use_oauth=True,
+        oauth_config=oauth,
+        # Kein atexit/Signal-Handling — wir laufen im Thread-Executor
+        auto_register_shutdown=False,
+        timeout=20,
+    )
+
+
+async def _run(cfg: dict, fn):
+    """Client bauen, fn(client) im Thread ausführen, Fehler durchreichen."""
+    missing = _missing_config(cfg)
+    if missing:
+        raise RuntimeError(
+            "IBKR-OAuth unvollständig — es fehlt: " + ", ".join(missing)
+            + " (Einstellungen → IBKR bzw. Schlüsseldateien auf dem Server)")
+
+    def call():
+        client = _make_client(cfg)
+        return fn(client)
+
     async with _conn_lock:
-        ib = await _connect(cfg)
-        try:
-            account = str(cfg.get("account") or "") or None
-            summary = await ib.accountSummaryAsync(account or "")
-            wanted = {"NetLiquidation", "TotalCashValue", "BuyingPower",
-                      "UnrealizedPnL", "RealizedPnL"}
-            values = {row.tag: {"value": row.value, "currency": row.currency}
-                      for row in summary if row.tag in wanted}
-            positions = [{
-                "symbol": p.contract.symbol, "exchange": p.contract.primaryExchange,
-                "currency": p.contract.currency, "quantity": p.position,
-                "avg_cost": round(p.avgCost, 4),
-            } for p in ib.positions(account or "")]
-            return {
-                "connected": True,
-                "server_version": ib.client.serverVersion(),
-                "trading_enabled": _trading_enabled(cfg),
-                "accounts": ib.managedAccounts(),
-                "summary": values,
-                "positions": positions,
-            }
-        finally:
-            ib.disconnect()
+        return await asyncio.to_thread(call)
+
+
+def _account_id(client, cfg: dict) -> str:
+    acct = str(cfg.get("account") or "").strip()
+    if acct:
+        return acct
+    accounts = client.portfolio_accounts().data or []
+    if not accounts:
+        raise RuntimeError("Kein IBKR-Konto in der OAuth-Session gefunden")
+    return accounts[0]["accountId"]
+
+
+# ---------------------------------------------------------------- Status
+
+async def status(db: AsyncSession) -> dict:
+    """Verbindungstest: Konto-Kennzahlen + offene IBKR-Positionen."""
+    cfg = await ibkr_config(db)
+
+    def fetch(client) -> dict:
+        acct = _account_id(client, cfg)
+        summary = client.portfolio_summary(account_id=acct).data or {}
+
+        def val(key):
+            entry = summary.get(key) or {}
+            return {"value": entry.get("amount"), "currency": entry.get("currency")}
+
+        positions = []
+        page = 0
+        while True:
+            batch = client.positions(account_id=acct, page=page).data or []
+            for p in batch:
+                positions.append({
+                    "symbol": p.get("ticker") or p.get("contractDesc"),
+                    "conid": p.get("conid"),
+                    "exchange": p.get("listingExchange"),
+                    "currency": p.get("currency"),
+                    "asset_class": p.get("assetClass"),
+                    "quantity": p.get("position"),
+                    "avg_cost": round(float(p.get("avgCost") or 0), 4),
+                })
+            if len(batch) < 100:
+                break
+            page += 1
+        return {
+            "connected": True,
+            "api": "Web-API (OAuth)",
+            "trading_enabled": _trading_enabled(cfg),
+            "accounts": [acct],
+            "summary": {
+                "NetLiquidation": val("netliquidation"),
+                "TotalCashValue": val("totalcashvalue"),
+                "BuyingPower": val("buyingpower"),
+            },
+            "positions": positions,
+        }
+
+    return await _run(cfg, fetch)
+
+
+# ---------------------------------------------------------------- Orders
+
+def _conid_for(client, symbol: str, currency: str | None) -> int:
+    """Yahoo-Symbol → IBKR-conid. US (SMART/USD) und XETRA (.DE)."""
+    from ibind.client.ibkr_utils import StockQuery
+
+    sym = symbol.upper().strip()
+    if sym.endswith("-USD"):
+        raise ValueError(f"Krypto ({sym}) läuft nicht über die Aktien-API")
+    if sym.endswith(".DE"):
+        query = StockQuery(sym[:-3], contract_conditions={"exchange": "IBIS"})
+    else:
+        query = StockQuery(sym.replace("-", " "),
+                           contract_conditions={"isUS": True})
+    result = client.stock_conid_by_symbol(query).data or {}
+    conid = result.get(query.symbol)
+    if not conid:
+        raise ValueError(f"Kein IBKR-Kontrakt für {symbol} gefunden")
+    return int(conid)
+
+
+# Standard-Bestätigungsfragen, die wir bewusst durchwinken — alles
+# Informations-Prompts; ohne Echtzeit-Marktdaten-Abo fragt IBKR z.B.
+# bei jeder Order nach (MISSING_MARKET_DATA).
+def _default_answers() -> dict:
+    from ibind.client.ibkr_utils import QuestionType
+
+    return {
+        QuestionType.PRICE_PERCENTAGE_CONSTRAINT: True,
+        QuestionType.MISSING_MARKET_DATA: True,
+        QuestionType.TRIGGER_AND_FILL: True,
+        QuestionType.STOP_ORDER_RISKS: True,
+        QuestionType.CASH_QUANTITY: True,
+        QuestionType.DISRUPTIVE_ORDERS: True,
+        QuestionType.MANDATORY_CAP_PRICE: True,
+    }
 
 
 async def place_order(db: AsyncSession, symbol: str, side: str, quantity: float,
@@ -97,11 +220,8 @@ async def place_order(db: AsyncSession, symbol: str, side: str, quantity: float,
                       stop_loss: float | None = None,
                       currency: str | None = None,
                       wait_seconds: float = 12.0) -> dict:
-    """Order platzieren; mit take_profit/stop_loss als Bracket (OCA).
-
-    Liefert Order-Status und (falls binnen wait_seconds gefüllt) den
-    durchschnittlichen Fill-Preis plus IBKR-Kommission."""
-    from ib_async import LimitOrder, MarketOrder, StopOrder
+    """Order über die Web-API; mit take_profit/stop_loss als Bracket."""
+    from ibind.client.ibkr_utils import make_order_request
 
     cfg = await ibkr_config(db)
     if not _trading_enabled(cfg):
@@ -112,65 +232,57 @@ async def place_order(db: AsyncSession, symbol: str, side: str, quantity: float,
         raise ValueError("side muss BUY oder SELL sein")
     if quantity <= 0:
         raise ValueError("quantity muss > 0 sein")
+    if order_type == "LMT" and not limit_price:
+        raise ValueError("limit_price fehlt für LMT-Order")
 
-    contract = contract_for(symbol, currency)
-    async with _conn_lock:
-        ib = await _connect(cfg)
-        try:
-            await ib.qualifyContractsAsync(contract)
-            account = str(cfg.get("account") or "") or ""
+    def submit(client) -> dict:
+        acct = _account_id(client, cfg)
+        conid = _conid_for(client, symbol, currency)
+        coid = f"stx-{uuid.uuid4().hex[:18]}"
+        requests = [make_order_request(
+            conid=conid, side=side, quantity=quantity,
+            order_type=order_type, acct_id=acct, coid=coid,
+            price=limit_price if order_type == "LMT" else None,
+        )]
+        exit_side = "SELL" if side == "BUY" else "BUY"
+        if take_profit:
+            requests.append(make_order_request(
+                conid=conid, side=exit_side, quantity=quantity,
+                order_type="LMT", acct_id=acct, price=take_profit,
+                parent_id=coid))
+        if stop_loss:
+            requests.append(make_order_request(
+                conid=conid, side=exit_side, quantity=quantity,
+                order_type="STP", acct_id=acct, aux_price=stop_loss,
+                parent_id=coid))
 
-            if order_type == "LMT":
-                if not limit_price:
-                    raise ValueError("limit_price fehlt für LMT-Order")
-                parent = LimitOrder(side, quantity, limit_price)
-            else:
-                parent = MarketOrder(side, quantity)
-            if account:
-                parent.account = account
+        result = client.place_order(requests, answers=_default_answers(),
+                                    account_id=acct).data
+        entries = result if isinstance(result, list) else [result]
+        order_id = next((e.get("order_id") for e in entries
+                         if isinstance(e, dict) and e.get("order_id")), None)
 
-            trades = []
-            if take_profit or stop_loss:
-                # Bracket: Parent + verknüpfte Exits (One-Cancels-All)
-                parent.transmit = False
-                parent_trade = ib.placeOrder(contract, parent)
-                trades.append(parent_trade)
-                exit_side = "SELL" if side == "BUY" else "BUY"
-                if take_profit:
-                    tp = LimitOrder(exit_side, quantity, take_profit)
-                    tp.parentId = parent.orderId
-                    tp.transmit = not stop_loss
-                    if account:
-                        tp.account = account
-                    trades.append(ib.placeOrder(contract, tp))
-                if stop_loss:
-                    sl = StopOrder(exit_side, quantity, stop_loss)
-                    sl.parentId = parent.orderId
-                    sl.transmit = True
-                    if account:
-                        sl.account = account
-                    trades.append(ib.placeOrder(contract, sl))
-            else:
-                trades.append(ib.placeOrder(contract, parent))
+        # Kurz auf den Fill warten (Market-Orders füllen i.d.R. sofort)
+        status_txt, avg_price, filled = "Submitted", None, 0.0
+        deadline = time.monotonic() + wait_seconds
+        while order_id and time.monotonic() < deadline:
+            try:
+                st = client.order_status(order_id).data or {}
+            except Exception:
+                break
+            status_txt = st.get("order_status") or status_txt
+            avg_price = st.get("average_price") or avg_price
+            filled = st.get("cum_fill") or filled
+            if status_txt in ("Filled", "Cancelled", "Rejected"):
+                break
+            time.sleep(0.5)
+        return {
+            "order_id": order_id,
+            "status": status_txt,
+            "filled": float(filled or 0),
+            "avg_fill_price": float(avg_price) if avg_price else None,
+            "commission": None,  # liefert die Web-API erst im Abrechnungslauf
+            "bracket_orders": len(requests) - 1,
+        }
 
-            main_trade = trades[0]
-            deadline = asyncio.get_event_loop().time() + wait_seconds
-            while (asyncio.get_event_loop().time() < deadline
-                   and not main_trade.isDone()):
-                await asyncio.sleep(0.5)
-
-            fills = main_trade.fills
-            commission = sum(
-                f.commissionReport.commission for f in fills
-                if f.commissionReport and f.commissionReport.commission
-            ) or None
-            return {
-                "order_id": main_trade.order.orderId,
-                "status": main_trade.orderStatus.status,
-                "filled": main_trade.orderStatus.filled,
-                "avg_fill_price": main_trade.orderStatus.avgFillPrice or None,
-                "commission": round(commission, 2) if commission else None,
-                "bracket_orders": len(trades) - 1,
-            }
-        finally:
-            ib.disconnect()
+    return await _run(cfg, submit)
