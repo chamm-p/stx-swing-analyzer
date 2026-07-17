@@ -36,6 +36,21 @@ async def lifespan(app: FastAPI):
         await seed_universe(db)
         from app.analysis.fees import seed_platforms
         await seed_platforms(db)
+        # Verwaiste Backtests ehrlich beenden: Läufe leben als Task in
+        # DIESEM Prozess — nach einem Neustart/Deploy kann ein "running"
+        # aus der Vorgänger-Instanz nie mehr fertig werden.
+        from sqlalchemy import update
+
+        from app.models import BacktestRun
+        result = await db.execute(
+            update(BacktestRun).where(BacktestRun.status == "running")
+            .values(status="error",
+                    error="Abgebrochen: Backend wurde während des Laufs neu "
+                          "gestartet (Deploy) — bitte erneut starten."))
+        if result.rowcount:
+            await db.commit()
+            logging.getLogger("app.main").warning(
+                "%d verwaiste Backtest-Läufe als abgebrochen markiert", result.rowcount)
     # MCP-Session-Manager mitlaufen lassen (Mount führt eigene Lifespans nicht aus).
     async with contextlib.AsyncExitStack() as stack:
         await stack.enter_async_context(mcp_server.session_manager.run())
