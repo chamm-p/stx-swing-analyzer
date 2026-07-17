@@ -75,11 +75,19 @@ async def job_sync_news() -> None:
 
 
 async def job_scan_universe() -> None:
+    from app.analysis.pipeline import analyze_signal_candidates
+
     async with SessionLocal() as db:
         try:
             await scan_universe(db)
         except Exception as e:
             logger.exception("Universum-Scan fehlgeschlagen: %s", e)
+        try:
+            # BUY/SELL-Treffer direkt voll analysieren (bestätigt Signal,
+            # spart Wartezeit beim Reinklicken)
+            await analyze_signal_candidates(db)
+        except Exception as e:
+            logger.exception("Auto-Analyse nach Scan fehlgeschlagen: %s", e)
 
 
 async def job_analyze() -> None:
@@ -237,6 +245,7 @@ async def job_discovery() -> None:
     """Nächtlicher Discovery-Scan über die kompletten Börsenverzeichnisse."""
     from app.alerts.ops import track_failure, track_success
     from app.analysis.discovery import run_discovery
+    from app.analysis.pipeline import analyze_signal_candidates
 
     async with SessionLocal() as db:
         try:
@@ -246,6 +255,10 @@ async def job_discovery() -> None:
         except Exception as e:
             logger.exception("Discovery-Scan fehlgeschlagen: %s", e)
             await track_failure(db, "discovery", str(e), subject="Discovery-Scan")
+        try:
+            await analyze_signal_candidates(db)
+        except Exception as e:
+            logger.exception("Auto-Analyse nach Discovery fehlgeschlagen: %s", e)
 
 
 async def job_refresh_universe() -> None:

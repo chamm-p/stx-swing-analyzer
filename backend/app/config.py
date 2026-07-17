@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     # Default: nach EU-Schluss (~16:45) und nach US-Schluss (~21:15).
     digest_times: str = "16:45,21:15"
 
+    # Auto-Analyse: BUY/SELL-Treffer aus Screener & Discovery direkt voll
+    # analysieren (LLM + News + Termine) — bestätigt das Signal und spart
+    # das Warten beim Reinklicken. Stärkste zuerst, gedeckelt pro Scan.
+    auto_analyze_signals: bool = True
+    auto_analyze_max: int = 10        # max. Voll-Analysen je Scan-Lauf
+    auto_analyze_fresh_hours: int = 6  # frischer analysierte überspringen
+
     # Goldene Swing-Regeln
     risk_per_trade_pct: float = 1.0  # 1%-Regel: max. Verlust je Trade bis Stop
     swing_min_crv: float = 1.5       # Mindest-CRV für automatische Käufe

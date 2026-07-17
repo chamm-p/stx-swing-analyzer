@@ -71,9 +71,12 @@ async def top_signals(limit: int = 25, segment: str | None = None,
 
 
 async def _run_scan_bg() -> None:
+    from app.analysis.pipeline import analyze_signal_candidates
+
     async with SessionLocal() as db:
         try:
             await screener.scan_universe(db)
+            await analyze_signal_candidates(db)
         except Exception as e:
             logger.exception("Manueller Screener-Scan fehlgeschlagen: %s", e)
 
@@ -135,9 +138,11 @@ async def discovery_top(limit: int = 100, region: str | None = None,
 
 async def _run_discovery_bg() -> None:
     from app.analysis import discovery
+    from app.analysis.pipeline import analyze_signal_candidates
     async with SessionLocal() as db:
         try:
             await discovery.run_discovery(db)
+            await analyze_signal_candidates(db)
         except Exception as e:
             logger.exception("Manueller Discovery-Scan fehlgeschlagen: %s", e)
 

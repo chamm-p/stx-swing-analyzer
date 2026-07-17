@@ -240,3 +240,74 @@ async def run_all(db: AsyncSession) -> int:
         except Exception as e:
             logger.exception("Pipeline-Fehler für %s: %s", symbol, e)
     return count
+
+
+async def analyze_signal_candidates(db: AsyncSession) -> int:
+    """BUY/SELL-Treffer aus Screener & Discovery automatisch voll analysieren.
+
+    Zweck: (1) das technische Signal wird sofort durch die Voll-Analyse
+    (LLM + News + Termine) bestätigt oder relativiert, (2) beim Öffnen
+    des Werts liegt die Analyse schon vor — kein Warten mehr.
+
+    Guards: stärkste Kandidaten zuerst, gedeckelt (AUTO_ANALYZE_MAX),
+    frisch Analysierte übersprungen. Kein Watchlist-/Dashboard-Eintrag —
+    das Dashboard filtert auf den expliziten Watch-Scope."""
+    from sqlalchemy import func
+
+    from app.models import AnalysisResult, DiscoveryResult, ScreenerResult
+    from app.sources.yahoo import ensure_asset, sync_ohlcv
+
+    s = get_settings()
+    if not s.auto_analyze_signals or s.auto_analyze_max <= 0:
+        return 0
+
+    # Kandidaten einsammeln: (|Score|, Symbol) aus beiden Quellen
+    candidates: dict[str, float] = {}
+    last_scan = await db.scalar(select(func.max(ScreenerResult.run_at)))
+    if last_scan is not None:
+        rows = (await db.execute(
+            select(ScreenerResult.symbol, ScreenerResult.technical_score)
+            .where(ScreenerResult.run_at == last_scan,
+                   ScreenerResult.action != "HOLD"))).all()
+        for sym, score in rows:
+            candidates[sym] = max(candidates.get(sym, 0), abs(score or 0))
+    last_disc = await db.scalar(select(func.max(DiscoveryResult.run_at)))
+    if last_disc is not None:
+        rows = (await db.execute(
+            select(DiscoveryResult.symbol, DiscoveryResult.technical_score)
+            .where(DiscoveryResult.run_at == last_disc,
+                   DiscoveryResult.action != "HOLD"))).all()
+        for sym, score in rows:
+            candidates[sym] = max(candidates.get(sym, 0), abs(score or 0))
+    if not candidates:
+        return 0
+
+    # Frisch analysierte raus (Ampel wäre ohnehin grün/gelb)
+    cutoff = utcnow() - timedelta(hours=s.auto_analyze_fresh_hours)
+    res = await db.execute(
+        select(AnalysisResult.symbol, func.max(AnalysisResult.ts))
+        .where(AnalysisResult.kind == "asset_review",
+               AnalysisResult.symbol.in_(list(candidates)))
+        .group_by(AnalysisResult.symbol))
+    for sym, ts in res.all():
+        if ts is not None and ts >= cutoff:
+            candidates.pop(sym, None)
+
+    ordered = sorted(candidates.items(), key=lambda kv: kv[1], reverse=True)
+    picked = [sym for sym, _ in ordered[:s.auto_analyze_max]]
+    if not picked:
+        return 0
+    logger.info("Auto-Analyse: %d Signal-Kandidaten (%s)", len(picked), ", ".join(picked))
+
+    analyzed = 0
+    for symbol in picked:
+        try:
+            # Discovery-Symbole haben noch keine Stammdaten/Kursdaten in der DB
+            await ensure_asset(db, symbol)
+            await sync_ohlcv(db, symbol)
+            if await run_for_symbol(db, symbol) is not None:
+                analyzed += 1
+        except Exception as e:
+            logger.warning("Auto-Analyse %s fehlgeschlagen: %s", symbol, e)
+    logger.info("Auto-Analyse fertig: %d/%d Signale erzeugt", analyzed, len(picked))
+    return analyzed
