@@ -161,6 +161,9 @@ INDEX_SPECS: list[tuple[str, object, int]] = [
         "https://de.wikipedia.org/wiki/Nasdaq-100", "us"), 80),
     ("US", lambda: fetch_wiki_tickers(
         "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", "us"), 400),
+    # S&P SmallCap 600 — disjunkt zum S&P 500, eigene Wikipedia-Tabelle
+    ("US_SMALL", lambda: fetch_wiki_tickers(
+        "https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", "us"), 450),
     ("DAX", lambda: fetch_wiki_tickers(
         "https://en.wikipedia.org/wiki/DAX", ".DE"), 30),
     ("MDAX", lambda: fetch_wiki_tickers(

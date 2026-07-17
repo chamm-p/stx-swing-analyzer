@@ -24,7 +24,7 @@ MAX_EQUITY_POINTS = 500
 BENCHMARKS = {
     "US": "SPY", "DAX": "^GDAXI", "CRYPTO": "BTC-USD",
     "NASDAQ100": "QQQ", "MDAX": "^MDAXI", "SDAX": "^SDAXI",
-    "EUROSTOXX": "^STOXX50E",
+    "EUROSTOXX": "^STOXX50E", "US_SMALL": "IWM",
 }
 
 # Auto-Optimierung: das System erkundet den Parameterraum selbst
@@ -117,7 +117,8 @@ async def start_run(payload: dict, background: bool = True) -> uuid.UUID:
                     "train_days": int(payload.get("train_days") or 365),
                     "test_days": int(payload.get("test_days") or 90),
                     "min_trades": int(payload.get("min_trades") or 20),
-                    "min_train_score": payload.get("min_train_score", 0.0)},
+                    "min_train_score": payload.get("min_train_score", 0.0),
+                    "max_symbols": int(payload.get("max_symbols") or 0)},
         )
         db.add(run)
         await db.commit()
@@ -168,6 +169,17 @@ async def _execute(run_id: uuid.UUID) -> None:
             symbols = [u.symbol for u in (await db.execute(q)).scalars().all()]
             if not symbols:
                 raise RuntimeError("Keine Universum-Symbole für dieses Segment")
+
+            # Optionale Stichprobe für große Segmente (z.B. S&P 600): fester
+            # Seed → reproduzierbar und unverzerrt; volle 600×10J würden auf
+            # dem Server viele Stunden rechnen
+            max_symbols = int((run.params or {}).get("max_symbols") or 0)
+            if max_symbols and len(symbols) > max_symbols:
+                import random
+                total = len(symbols)
+                symbols = sorted(random.Random(42).sample(sorted(symbols), max_symbols))
+                logger.info("Backtest %s: Stichprobe %d/%d Symbole (Seed 42)",
+                            run_id, max_symbols, total)
 
             bench_symbol = benchmark_symbol(run.segment)
             if do_backfill:

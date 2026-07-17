@@ -31,6 +31,8 @@ class BacktestRequest(BaseModel):
     # Flat-Guard: unter dieser Train-Qualität wird das Fenster nicht
     # gehandelt (None = aus)
     min_train_score: float | None = Field(default=0.0, ge=-10, le=10)
+    # Große Segmente (S&P 600): reproduzierbare Stichprobe (Seed 42), 0 = alle
+    max_symbols: int = Field(default=0, ge=0, le=1000)
 
 
 @router.post("/backtest/run", status_code=202)

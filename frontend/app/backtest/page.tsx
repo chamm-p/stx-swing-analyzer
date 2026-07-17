@@ -160,6 +160,7 @@ export default function BacktestPage() {
             <select value={segment} onChange={(e) => setSegment(e.target.value)} className={inputCls}>
               <option value="US+NASDAQ100">US-Aktien (S&P 500 + Nasdaq 100)</option>
               <option value="NASDAQ100">Nasdaq 100 (Tech)</option>
+              <option value="US_SMALL">US Small Caps (S&P 600)</option>
               <option value="DAX">DAX</option>
               <option value="MDAX">MDAX</option>
               <option value="SDAX">SDAX</option>
