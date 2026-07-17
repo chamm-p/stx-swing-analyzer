@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     # RSS-Auto-Abrufe; mit Credentials laufen r/-Quellen über OAuth
     reddit_client_id: str = ""
     reddit_client_secret: str = ""
+    # Eigener Takt für Reddit-RSS: unangemeldete Abrufe drosselt Reddit
+    # streng — alle 2h reicht für Foren-Sentiment locker
+    reddit_rss_interval_min: int = 120
 
     # Steuerprofil für den eCH-0196-Steuerauszug (Schweiz)
     tax_first_name: str = ""

@@ -123,6 +123,14 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
                 return 0
             return await _store_articles(db, source, entries)
 
+        # Reddit-RSS im eigenen, langsameren Takt: unangemeldete Abrufe
+        # drosselt Reddit streng — bis der Abstand um ist, still überspringen
+        # (kein Fehler, kein Commit; der letzte Stand bleibt sichtbar).
+        from app.config import get_settings
+        spacing_key = f"rss:spacing:{source.id}"
+        if await r.exists(spacing_key):
+            return 0
+
     async def _get() -> bytes:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True,
                                      headers=_FEED_HEADERS) as client:
@@ -148,6 +156,12 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
         source.last_fetch_at = utcnow()
         await db.commit()
         return 0
+
+    if subreddit:
+        # Erfolgreicher Abruf → nächster erst nach dem Reddit-Intervall
+        from app.config import get_settings as _gs
+        interval_min = max(_gs().reddit_rss_interval_min, 30)
+        await r.set(f"rss:spacing:{source.id}", "1", ex=interval_min * 60)
 
     feed = await asyncio.to_thread(feedparser.parse, raw)
     entries = [{
