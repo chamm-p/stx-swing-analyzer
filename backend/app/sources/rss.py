@@ -126,9 +126,13 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
         # Reddit-RSS im eigenen, langsameren Takt: unangemeldete Abrufe
         # drosselt Reddit streng — bis der Abstand um ist, still überspringen
         # (kein Fehler, kein Commit; der letzte Stand bleibt sichtbar).
+        # Zusätzlich eine GLOBALE Schranke: nur EINE Reddit-Anfrage pro
+        # Halbintervall — zwei Subreddits im selben Sync-Durchgang lösen
+        # sonst sofort 429 aus; so wechseln sich die Quellen ab.
         from app.config import get_settings
         spacing_key = f"rss:spacing:{source.id}"
-        if await r.exists(spacing_key):
+        global_key = "rss:spacing:reddit-global"
+        if await r.exists(spacing_key) or await r.exists(global_key):
             return 0
 
     async def _get() -> bytes:
@@ -158,10 +162,13 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
         return 0
 
     if subreddit:
-        # Erfolgreicher Abruf → nächster erst nach dem Reddit-Intervall
+        # Erfolgreicher Abruf → diese Quelle pausiert das volle Intervall,
+        # ALLE Reddit-Quellen das halbe (globale Ein-Anfrage-Schranke)
         from app.config import get_settings as _gs
         interval_min = max(_gs().reddit_rss_interval_min, 30)
         await r.set(f"rss:spacing:{source.id}", "1", ex=interval_min * 60)
+        await r.set("rss:spacing:reddit-global", "1",
+                    ex=max(interval_min // 2, 30) * 60)
 
     feed = await asyncio.to_thread(feedparser.parse, raw)
     entries = [{
