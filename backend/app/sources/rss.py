@@ -162,13 +162,15 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
         return 0
 
     if subreddit:
-        # Erfolgreicher Abruf → diese Quelle pausiert das volle Intervall,
-        # ALLE Reddit-Quellen das halbe (globale Ein-Anfrage-Schranke)
+        # Erfolgreicher Abruf → globale Schranke übers VOLLE Intervall:
+        # empirisch kassiert selbst eine Solo-Anfrage nach 90 Min noch 429;
+        # Reddit toleriert von uns offenbar nur ~1 Anfrage pro 2h. Die
+        # Quellen wechseln sich damit ab (je Subreddit ~alle 4h — für
+        # Foren-Sentiment völlig ausreichend).
         from app.config import get_settings as _gs
         interval_min = max(_gs().reddit_rss_interval_min, 30)
         await r.set(f"rss:spacing:{source.id}", "1", ex=interval_min * 60)
-        await r.set("rss:spacing:reddit-global", "1",
-                    ex=max(interval_min // 2, 30) * 60)
+        await r.set("rss:spacing:reddit-global", "1", ex=interval_min * 60)
 
     feed = await asyncio.to_thread(feedparser.parse, raw)
     entries = [{
