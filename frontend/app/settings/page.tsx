@@ -316,7 +316,9 @@ function RedditSection() {
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
   const [username, setUsername] = useState("");
+  const [rssToken, setRssToken] = useState("");
   const [hasSecret, setHasSecret] = useState(false);
+  const [hasToken, setHasToken] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -324,6 +326,7 @@ function RedditSection() {
       setClientId(d.client_id || "");
       setUsername(d.username || "");
       setHasSecret(!!d.has_client_secret);
+      setHasToken(!!d.has_rss_token);
     }).catch(() => {});
   }, []);
 
@@ -331,11 +334,15 @@ function RedditSection() {
     setMsg(null);
     try {
       const d = await api.put("/api/settings/reddit", {
-        client_id: clientId, username, client_secret: secret || undefined,
+        client_id: clientId, username,
+        client_secret: secret || undefined,
+        rss_token: rssToken || undefined,
       });
       setHasSecret(!!d.has_client_secret);
+      setHasToken(!!d.has_rss_token);
       setUsername(d.username || "");
       setSecret("");
+      setRssToken("");
       setMsg("✅ Gespeichert — wirkt ab dem nächsten Reddit-Abruf.");
     } catch (e: any) {
       setMsg(e.message);
@@ -346,15 +353,22 @@ function RedditSection() {
     <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
       <h2 className="mb-1 font-semibold">👽 Reddit-API</h2>
       <p className="mb-3 text-xs text-slate-500">
-        Reddit filtert automatisierte RSS-Abrufe (429). Mit einer kostenlosen API-App laufen die
-        r/-Quellen stabil über OAuth: auf <code>reddit.com/prefs/apps</code> eine App vom Typ{" "}
-        <b>„script"</b> anlegen — die ID steht unter dem App-Namen, das Secret daneben.
+        Reddit filtert anonyme RSS-Abrufe. Am einfachsten: <b>persönlicher Feed-Token</b> —
+        auf <code>old.reddit.com</code> → Präferenzen → Feeds die RSS-URL kopieren, sie enthält{" "}
+        <code>?feed=…&user=…</code>. Nutzername + Token unten eintragen, dann laufen die Abrufe
+        authentifiziert als dein Konto (keine Bot-Wall). Der Token wird verschlüsselt gespeichert.
       </p>
       <FieldGrid>
-        <Field label="Reddit-Nutzername (für die Feed-Kennung)">
+        <Field label="Reddit-Nutzername">
           <input value={username} onChange={(e) => setUsername(e.target.value)}
             placeholder="dein_reddit_name"
-            title="Wird als „by /u/<name>“ in der Abruf-Kennung referenziert — Reddits Konvention für höfliche Bots. Wirkt sofort, kein Neustart nötig."
+            title="Aus der Feed-URL (user=…) bzw. dein Reddit-Name."
+            className={inputCls} />
+        </Field>
+        <Field label={`Feed-Token${hasToken ? " (gesetzt)" : ""}`}>
+          <input type="password" value={rssToken} onChange={(e) => setRssToken(e.target.value)}
+            placeholder={hasToken ? "unverändert lassen" : "feed=… aus der URL"}
+            title="Der feed=-Wert aus deiner persönlichen Feed-URL. Geheim — verschlüsselt gespeichert."
             className={inputCls} />
         </Field>
         <Field label="Client-ID (optional, API-App)">

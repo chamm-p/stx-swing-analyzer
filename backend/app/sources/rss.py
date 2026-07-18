@@ -109,6 +109,8 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
     from app.sources.reddit import subreddit_from_url
     subreddit = subreddit_from_url(source.url)
     headers = dict(_FEED_HEADERS)
+    fetch_url = source.url
+    rss_token = ""
     if subreddit:
         from app.services_settings import load_settings
         reddit_cfg = await load_settings(db, "reddit")
@@ -136,30 +138,37 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
                 return 0
             return await _store_articles(db, source, entries)
 
-        # Reddit-RSS im eigenen, langsameren Takt: unangemeldete Abrufe
-        # drosselt Reddit streng — bis der Abstand um ist, still überspringen
-        # (kein Fehler, kein Commit; der letzte Stand bleibt sichtbar).
-        # Zusätzlich eine GLOBALE Schranke: nur EINE Reddit-Anfrage pro
-        # Intervall, über alle Quellen.
+        # Persönlicher Feed-Token (old.reddit → Feeds): authentifiziert den
+        # Abruf als eigenes Konto → keine Bot-Wall. Damit entfällt die
+        # globale Ein-Anfrage-Schranke (angemeldete Feeds dürfen regulär
+        # gepollt werden); nur pro Quelle bleibt der eigene Takt.
+        rss_token = str(reddit_cfg.get("rss_token") or "").strip()
         from app.config import get_settings
         interval_min = max(get_settings().reddit_rss_interval_min, 30)
         spacing_key = f"rss:spacing:{source.id}"
-        global_key = "rss:spacing:reddit-global"
-        if await r.exists(spacing_key) or await r.exists(global_key):
+        if await r.exists(spacing_key):
             if source.last_error:
-                # Alter 429-Text wäre irreführend — wir warten nur planmäßig
                 source.last_error = None
                 await db.commit()
             return 0
-        # Slot SOFORT belegen — auch ein 429-Versuch ist eine Anfrage.
-        # Sonst laufen die Cooldowns beider Quellen synchron ab und beide
-        # feuern im selben Sync-Durchgang erneut gleichzeitig.
-        await r.set(global_key, "1", ex=interval_min * 60)
+        if rss_token and username:
+            sep = "&" if "?" in source.url else "?"
+            fetch_url = f"{source.url}{sep}feed={rss_token}&user={username}"
+        else:
+            # Anonym: globale Schranke — nur EINE Reddit-Anfrage pro Intervall
+            global_key = "rss:spacing:reddit-global"
+            if await r.exists(global_key):
+                if source.last_error:
+                    source.last_error = None
+                    await db.commit()
+                return 0
+            # Slot SOFORT belegen — auch ein 429-Versuch ist eine Anfrage
+            await r.set(global_key, "1", ex=interval_min * 60)
 
     async def _get() -> bytes:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True,
                                      headers=headers) as client:
-            resp = await client.get(source.url)
+            resp = await client.get(fetch_url)
             # Reddit signalisiert die Bot-Wall auch als 403 "Blocked" —
             # Retries verschärfen die Sperre nur, sofort pausieren
             if resp.status_code == 429 or (resp.status_code == 403 and subreddit):
@@ -179,7 +188,12 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
         logger.warning("rss:%s rate-limited — Pause %ds", source.name, e.wait_seconds)
         return 0
     except RuntimeError as e:
-        source.last_error = str(e)[:500]
+        # httpx-Fehler enthalten die volle URL inkl. Feed-Token → scrubben,
+        # damit das Geheimnis nie in DB/UI/Logs landet
+        msg = str(e)
+        if rss_token:
+            msg = msg.replace(rss_token, "***")
+        source.last_error = msg[:500]
         source.last_fetch_at = utcnow()
         await db.commit()
         return 0

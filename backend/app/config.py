@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     # Echter Reddit-Nutzername für die UA-Konvention "(by /u/<name>)" —
     # Reddit will höfliche Bots einem realen Konto zuordnen können
     reddit_username: str = ""
+    # Persönlicher RSS-Feed-Token (old.reddit.com → Präferenzen → Feeds):
+    # authentifiziert den Abruf als eigenes Konto, umgeht die Bot-Wall
+    reddit_rss_token: str = ""
 
     # Steuerprofil für den eCH-0196-Steuerauszug (Schweiz)
     tax_first_name: str = ""

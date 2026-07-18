@@ -87,6 +87,7 @@ class RedditSettings(BaseModel):
     client_id: str | None = None
     client_secret: str | None = None  # leer = Bestand behalten
     username: str | None = None  # für die "(by /u/<name>)"-Feed-Kennung
+    rss_token: str | None = None  # persönlicher Feed-Token (leer = behalten)
 
 
 @router.get("/settings/reddit")

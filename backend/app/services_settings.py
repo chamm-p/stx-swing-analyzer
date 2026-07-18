@@ -70,6 +70,7 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "client_id": ("reddit_client_id", False),
         "client_secret": ("reddit_client_secret", True),
         "username": ("reddit_username", False),
+        "rss_token": ("reddit_rss_token", True),
     },
     # Steuerprofil (eCH-0196-Steuerauszug)
     "tax": {
