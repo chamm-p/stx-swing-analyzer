@@ -39,45 +39,58 @@ def test_dtt_signal_bedingungen():
     assert dtt_score({**ok, "sma20": 103, "sma50": 104})[0] == -1.0
 
 
+def _fire_once():
+    """score_fn, das genau einmal einen Einstieg auslöst (Signal-Logik
+    ist separat getestet; hier zählt die Engine-Exit-Mechanik)."""
+    state = {"done": False}
+
+    def fn(symbol, snapshot):
+        if not state["done"]:
+            state["done"] = True
+            return 1.0
+        return 0.0
+    return fn
+
+
 def test_dtt_fixziel_ist_crv_2():
-    """Aufwärtstrend mit Golden Cross → Ziel = Einstieg + 2×(Einstieg−Stop)."""
-    # Langer Aufbau über EMA200, dann ein SMA20/50-Cross, dann Rally ins Ziel
-    base = list(np.linspace(80, 100, 220))          # Aufbau, Kurs über EMA
-    ramp = list(np.linspace(100, 160, 60))          # Rally nach dem Cross
-    df = make_df(base + ramp)
+    """R-Fixziel: Ziel = Einstieg + 2×(Einstieg − Swing-Low-Stop)."""
+    flat = [100.0] * 230
+    rally = list(np.linspace(100, 106, 20))  # deckt Ziel (~101) locker
+    df = make_df(flat + rally)
     cfg = StrategyConfig(
         start_capital=10_000, position_size=1_000, max_positions=5,
-        slippage_bps=0.0, warmup_days=200, horizon_days=365,
+        slippage_bps=0.0, warmup_days=210, horizon_days=365,
         cooldown_days=3, threshold=0.5,
         strategy_kind="dtt", target_r=2.0, breakeven_r=0.0,
     )
-    result = run_backtest({"TST": df}, cfg)
+    result = run_backtest({"TST": df}, cfg, score_fn=_fire_once())
     done = [t for t in result.trades if t.exit_date is not None]
     assert done, "kein Trade ausgelöst"
-    tp = [t for t in done if t.reason == "target"]
-    assert tp, "Ziel wurde nicht erreicht"
-    tr = tp[0]
+    tr = done[0]
+    assert tr.reason == "target"
     expected_target = tr.entry_price + 2.0 * tr.risk_unit
     assert abs(tr.exit_price - expected_target) / expected_target < 0.02
     assert tr.pnl > 0
 
 
 def test_dtt_breakeven_schuetzt_gewinn():
-    """Rally auf 1:1, dann Absturz unter Einstieg → Break-even-Stop = Einstieg."""
-    base = list(np.linspace(80, 100, 220))
-    up = list(np.linspace(100, 112, 12))   # über 1:1 (Stop ~5% → 1R ~5)
-    down = list(np.linspace(112, 90, 20))  # zurück unter Einstieg
-    df = make_df(base + up + down)
+    """Break-even: Rally über 1:1 zieht Stop auf Einstieg; späterer Absturz
+    stoppt bei Einstieg statt am ursprünglichen Swing-Low."""
+    flat = [100.0] * 230
+    up = list(np.linspace(100, 103, 10))   # über 1:1 (R≈0.5 → 1R bei ~100.5)
+    down = list(np.linspace(103, 96, 15))  # zurück unter Einstieg
+    df = make_df(flat + up + down)
     cfg = StrategyConfig(
         start_capital=10_000, position_size=1_000, max_positions=5,
-        slippage_bps=0.0, warmup_days=200, horizon_days=365,
+        slippage_bps=0.0, warmup_days=210, horizon_days=365,
         cooldown_days=3, threshold=0.5,
-        strategy_kind="dtt", target_r=5.0, breakeven_r=1.0,  # Ziel weit → BE greift zuerst
+        strategy_kind="dtt", target_r=10.0, breakeven_r=1.0,  # Ziel weit → BE greift zuerst
     )
-    result = run_backtest({"TST": df}, cfg)
+    result = run_backtest({"TST": df}, cfg, score_fn=_fire_once())
     done = [t for t in result.trades if t.exit_date is not None]
     assert done
     tr = done[0]
-    # Break-even: Exit ~ Einstieg (nicht der ursprüngliche Swing-Low-Stop)
-    assert tr.exit_price >= tr.entry_price * 0.995
     assert tr.reason == "stop"
+    # Break-even: Exit ≈ Einstieg, nicht der ursprüngliche Swing-Low-Stop
+    assert tr.exit_price >= tr.entry_price * 0.99
+    assert tr.pnl > -1.0  # praktisch kein Verlust
