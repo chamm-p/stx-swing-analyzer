@@ -108,9 +108,22 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
     # kein 429-Fingerprint-Filter) — Credentials aus den Einstellungen.
     from app.sources.reddit import subreddit_from_url
     subreddit = subreddit_from_url(source.url)
+    headers = dict(_FEED_HEADERS)
     if subreddit:
         from app.services_settings import load_settings
         reddit_cfg = await load_settings(db, "reddit")
+        # Echten Reddit-Nutzernamen in der UA-Konvention referenzieren
+        # (Settings → Reddit) — Änderung wirkt sofort, kein Deploy nötig
+        username = str(reddit_cfg.get("username") or "").strip()
+        for prefix in ("/u/", "u/"):
+            if username.startswith(prefix):
+                username = username[len(prefix):]
+                break
+        username = username.strip("/")
+        if username:
+            headers["User-Agent"] = (f"stx-swing-analyzer/1.0 "
+                                     f"(self-hosted single-user RSS reader; "
+                                     f"by /u/{username})")
         if reddit_cfg.get("client_id") and reddit_cfg.get("client_secret"):
             from app.sources.reddit import fetch_subreddit_entries
             try:
@@ -145,7 +158,7 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
 
     async def _get() -> bytes:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True,
-                                     headers=_FEED_HEADERS) as client:
+                                     headers=headers) as client:
             resp = await client.get(source.url)
             # Reddit signalisiert die Bot-Wall auch als 403 "Blocked" —
             # Retries verschärfen die Sperre nur, sofort pausieren

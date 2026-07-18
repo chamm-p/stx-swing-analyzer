@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # Eigener Takt für Reddit-RSS: unangemeldete Abrufe drosselt Reddit
     # streng — alle 2h reicht für Foren-Sentiment locker
     reddit_rss_interval_min: int = 120
+    # Echter Reddit-Nutzername für die UA-Konvention "(by /u/<name>)" —
+    # Reddit will höfliche Bots einem realen Konto zuordnen können
+    reddit_username: str = ""
 
     # Steuerprofil für den eCH-0196-Steuerauszug (Schweiz)
     tax_first_name: str = ""

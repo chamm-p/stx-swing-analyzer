@@ -315,12 +315,14 @@ function IbkrSection() {
 function RedditSection() {
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
+  const [username, setUsername] = useState("");
   const [hasSecret, setHasSecret] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
     api.get("/api/settings/reddit").then((d) => {
       setClientId(d.client_id || "");
+      setUsername(d.username || "");
       setHasSecret(!!d.has_client_secret);
     }).catch(() => {});
   }, []);
@@ -329,11 +331,12 @@ function RedditSection() {
     setMsg(null);
     try {
       const d = await api.put("/api/settings/reddit", {
-        client_id: clientId, client_secret: secret || undefined,
+        client_id: clientId, username, client_secret: secret || undefined,
       });
       setHasSecret(!!d.has_client_secret);
+      setUsername(d.username || "");
       setSecret("");
-      setMsg("✅ Gespeichert — Reddit-Quellen laufen ab dem nächsten News-Sync über die API.");
+      setMsg("✅ Gespeichert — wirkt ab dem nächsten Reddit-Abruf.");
     } catch (e: any) {
       setMsg(e.message);
     }
@@ -347,8 +350,14 @@ function RedditSection() {
         r/-Quellen stabil über OAuth: auf <code>reddit.com/prefs/apps</code> eine App vom Typ{" "}
         <b>„script"</b> anlegen — die ID steht unter dem App-Namen, das Secret daneben.
       </p>
-      <FieldGrid cols={2}>
-        <Field label="Client-ID">
+      <FieldGrid>
+        <Field label="Reddit-Nutzername (für die Feed-Kennung)">
+          <input value={username} onChange={(e) => setUsername(e.target.value)}
+            placeholder="dein_reddit_name"
+            title="Wird als „by /u/<name>“ in der Abruf-Kennung referenziert — Reddits Konvention für höfliche Bots. Wirkt sofort, kein Neustart nötig."
+            className={inputCls} />
+        </Field>
+        <Field label="Client-ID (optional, API-App)">
           <input value={clientId} onChange={(e) => setClientId(e.target.value)} className={inputCls} />
         </Field>
         <Field label={`Client-Secret${hasSecret ? " (gesetzt)" : ""}`}>
