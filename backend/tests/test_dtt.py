@@ -53,9 +53,12 @@ def _fire_once():
 
 
 def test_dtt_fixziel_ist_crv_2():
-    """R-Fixziel: Ziel = Einstieg + 2×(Einstieg − Swing-Low-Stop)."""
-    flat = [100.0] * 230
-    rally = list(np.linspace(100, 106, 20))  # deckt Ziel (~101) locker
+    """R-Fixziel: Ziel = Einstieg + 2×(Einstieg − Swing-Low-Stop).
+
+    Kurs springt beim Einstieg über das Warmup-Niveau, damit die Lows der
+    Rally klar über dem Swing-Low-Stop (99.5) liegen."""
+    flat = [100.0] * 211                       # Warmup; Lows bei 99.5
+    rally = list(np.linspace(103, 116, 15))    # Sprung auf 103, dann Ziel (~110)
     df = make_df(flat + rally)
     cfg = StrategyConfig(
         start_capital=10_000, position_size=1_000, max_positions=5,
@@ -76,10 +79,9 @@ def test_dtt_fixziel_ist_crv_2():
 def test_dtt_breakeven_schuetzt_gewinn():
     """Break-even: Rally über 1:1 zieht Stop auf Einstieg; späterer Absturz
     stoppt bei Einstieg statt am ursprünglichen Swing-Low."""
-    flat = [100.0] * 230
-    up = list(np.linspace(100, 103, 10))   # über 1:1 (R≈0.5 → 1R bei ~100.5)
-    down = list(np.linspace(103, 96, 15))  # zurück unter Einstieg
-    df = make_df(flat + up + down)
+    flat = [100.0] * 211                                   # Lows bei 99.5
+    move = [101, 102, 104, 103, 101, 99, 97, 96, 95, 94]   # Einstieg 101, 1:1, Absturz
+    df = make_df(flat + [float(x) for x in move])
     cfg = StrategyConfig(
         start_capital=10_000, position_size=1_000, max_positions=5,
         slippage_bps=0.0, warmup_days=210, horizon_days=365,
@@ -91,6 +93,6 @@ def test_dtt_breakeven_schuetzt_gewinn():
     assert done
     tr = done[0]
     assert tr.reason == "stop"
-    # Break-even: Exit ≈ Einstieg, nicht der ursprüngliche Swing-Low-Stop
+    # Break-even: Exit ≈ Einstieg (101), nicht der Swing-Low-Stop (99.5)
     assert tr.exit_price >= tr.entry_price * 0.99
     assert tr.pnl > -1.0  # praktisch kein Verlust
