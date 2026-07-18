@@ -147,7 +147,9 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True,
                                      headers=_FEED_HEADERS) as client:
             resp = await client.get(source.url)
-            if resp.status_code == 429:
+            # Reddit signalisiert die Bot-Wall auch als 403 "Blocked" —
+            # Retries verschärfen die Sperre nur, sofort pausieren
+            if resp.status_code == 429 or (resp.status_code == 403 and subreddit):
                 retry_after = int(resp.headers.get("Retry-After") or 0)
                 raise RateLimited(max(retry_after, 7200))
             resp.raise_for_status()
