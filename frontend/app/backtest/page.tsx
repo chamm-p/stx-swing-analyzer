@@ -41,6 +41,8 @@ export default function BacktestPage() {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [platforms, setPlatforms] = useState<{ id: number; name: string }[]>([]);
   const [segment, setSegment] = useState("US+NASDAQ100");
+  const [strategyKind, setStrategyKind] = useState<"meanrev" | "momentum">("meanrev");
+  const [maxSymbols, setMaxSymbols] = useState("0");
   const [days, setDays] = useState("730");
   const [backfill, setBackfill] = useState(false);
   const [platformId, setPlatformId] = useState<number | "">("");
@@ -89,6 +91,13 @@ export default function BacktestPage() {
       }
     }
     const mts = parseFloat(minTrainScore.replace(",", "."));
+    const allParams: Record<string, any> = { ...params };
+    if (strategyKind === "momentum") {
+      allParams.strategy_kind = "momentum";
+      allParams.regime_sma = 200;                 // nur über SMA200 einsteigen
+      if (!allParams.trailing_stop_atr) allParams.trailing_stop_atr = 3.0;
+      if (mode !== "optimize" && !params.horizon_days) allParams.horizon_days = 90;
+    }
     try {
       const res = await api.post("/api/backtest/run", {
         label: label.trim() || null,
@@ -96,7 +105,8 @@ export default function BacktestPage() {
         days: parseInt(days),
         backfill,
         platform_id: platformId === "" ? null : platformId,
-        params,
+        params: allParams,
+        max_symbols: parseInt(maxSymbols) || 0,
         mode,
         grid,
         train_days: parseInt(trainDays),
@@ -168,6 +178,19 @@ export default function BacktestPage() {
               <option value="CRYPTO">Cryptos</option>
               <option value="alle">Gesamtes Universum</option>
             </select>
+          </Field>
+          <Field label="Strategie">
+            <select value={strategyKind} onChange={(e) => setStrategyKind(e.target.value as any)}
+              className={inputCls}
+              title="Mean-Reversion: Schwäche kaufen, ATR-Fixziel (Live-Strategie). Momentum: Stärke kaufen, Trailing-Stop, nur über SMA200.">
+              <option value="meanrev">Mean-Reversion (Live)</option>
+              <option value="momentum">Momentum (Trailing-Stop)</option>
+            </select>
+          </Field>
+          <Field label="Stichprobe (0 = alle)">
+            <input value={maxSymbols} onChange={(e) => setMaxSymbols(e.target.value)}
+              className={inputCls}
+              title="Große Segmente (S&P 600): reproduzierbare Zufalls-Stichprobe (Seed 42) — spart Stunden Rechenzeit" />
           </Field>
           <Field label="Zeitraum">
             <select value={days} onChange={(e) => setDays(e.target.value)} className={inputCls}>

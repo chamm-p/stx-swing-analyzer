@@ -229,3 +229,58 @@ def score_signal(indicator_snapshot: dict, sentiment: float | None,
         components=components,
         profile=profile.name,
     )
+
+
+def momentum_score(snapshot: dict) -> tuple[float, dict]:
+    """Momentum-Profil: Stärke kaufen statt Schwäche (Gegenentwurf zur
+    Mean-Reversion). Deterministisch, rein technisch:
+
+    - trend (±0.4):   Close > SMA50 > SMA200 = intakter Aufwärtstrend;
+                      unter SMA200 klar negativ (wirkt als Trendbruch-Exit)
+    - breakout (0.3): Nähe zum 60-Tage-Hoch — Stärke, die Anschluss findet
+    - pullback (±0.2): RSI 40–60 im Aufwärtstrend = gesunder Rücksetzer
+                      (der Momentum-Einstieg); RSI ≥ 80 = überhitzt
+    - macd (±0.1):    Histogramm positiv/steigend stützt
+
+    Exit-Logik ergibt sich aus dem Score selbst: bricht der Trend
+    (Close < SMA200), kippt der Score unter -0.4 und löst das
+    Signal-Exit der Engine aus.
+    """
+    close = snapshot.get("close")
+    sma200 = snapshot.get("sma200")
+    if not close or sma200 is None or sma200 != sma200:
+        return 0.0, {}
+    sma50 = snapshot.get("sma50")
+    rsi14 = snapshot.get("rsi14")
+    hist = snapshot.get("macd_hist")
+    hist_prev = snapshot.get("macd_hist_prev")
+    high60 = snapshot.get("high_60d")
+
+    comps: dict[str, float] = {}
+    if sma50 is not None and sma50 == sma50 and close > sma50 > sma200:
+        comps["trend"] = 0.4
+    elif close > sma200:
+        comps["trend"] = 0.2
+    else:
+        comps["trend"] = -0.4
+
+    if high60 and high60 == high60 and high60 > 0:
+        proximity = close / high60
+        comps["breakout"] = 0.3 if proximity >= 0.98 else \
+            0.15 if proximity >= 0.92 else 0.0
+
+    if rsi14 is not None and rsi14 == rsi14:
+        if comps["trend"] > 0 and 40 <= rsi14 <= 60:
+            comps["pullback"] = 0.2
+        elif rsi14 >= 80:
+            comps["pullback"] = -0.2
+
+    if hist is not None and hist == hist:
+        if hist > 0:
+            rising = hist_prev is not None and hist_prev == hist_prev and hist >= hist_prev
+            comps["macd"] = 0.1 if rising else 0.05
+        else:
+            comps["macd"] = -0.1
+
+    total = max(-1.0, min(1.0, sum(comps.values())))
+    return round(total, 4), comps

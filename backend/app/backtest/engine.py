@@ -64,6 +64,9 @@ class Trade:
     reason: str | None = None
     target_price: float | None = None
     stop_price: float | None = None
+    # Trailing-Stop (Momentum-Strategie): ATR beim Einstieg + Hochwasserstand
+    entry_atr: float | None = None
+    high_water: float = 0.0
 
     @property
     def pnl(self) -> float | None:
@@ -103,6 +106,10 @@ def run_backtest(
     def score(symbol: str, snapshot: dict) -> float:
         if score_fn is not None:
             return score_fn(symbol, snapshot)
+        if config.strategy_kind == "momentum":
+            from app.analysis.scoring import momentum_score
+            value, _ = momentum_score(snapshot)
+            return value
         value, _ = technical_score(snapshot, profile)
         return value
 
@@ -170,17 +177,29 @@ def run_backtest(
             quantity = round(max(budget - fee, 0) / price, 6)
             if quantity <= 0:
                 continue
-            targets = compute_price_targets(
-                row.to_dict(), "BUY", config.horizon_days,
-                target_atr_factor=config.target_atr_factor,
-                stop_atr_factor=config.stop_atr_factor,
-            ) or {}
-            open_trades[symbol] = Trade(
-                symbol=symbol, entry_date=t, entry_price=price,
-                quantity=quantity, fee_buy=fee,
-                target_price=targets.get("target_price"),
-                stop_price=targets.get("stop_price"),
-            )
+            atr_val = float(row["atr14"]) if row["atr14"] == row["atr14"] else None
+            if config.trailing_stop_atr > 0:
+                # Momentum: kein Fixziel (Gewinner laufen lassen), Start-Stop
+                # unter dem Einstieg, danach zieht der Trailing-Stop nach
+                stop = price - config.stop_atr_factor * atr_val if atr_val else None
+                open_trades[symbol] = Trade(
+                    symbol=symbol, entry_date=t, entry_price=price,
+                    quantity=quantity, fee_buy=fee,
+                    target_price=None, stop_price=stop,
+                    entry_atr=atr_val, high_water=price,
+                )
+            else:
+                targets = compute_price_targets(
+                    row.to_dict(), "BUY", config.horizon_days,
+                    target_atr_factor=config.target_atr_factor,
+                    stop_atr_factor=config.stop_atr_factor,
+                ) or {}
+                open_trades[symbol] = Trade(
+                    symbol=symbol, entry_date=t, entry_price=price,
+                    quantity=quantity, fee_buy=fee,
+                    target_price=targets.get("target_price"),
+                    stop_price=targets.get("stop_price"),
+                )
             cash -= quantity * price + fee
         pending_entries = []
 
@@ -192,6 +211,9 @@ def run_backtest(
             trade = open_trades[symbol]
             row = frame.loc[t]
             low, high, close = float(row["low"]), float(row["high"]), float(row["close"])
+            # Stop-Check gegen den Stand von GESTERN — die Intraday-
+            # Reihenfolge von High und Low ist unbekannt, ein heute
+            # nachgezogener Trailing-Stop wäre Look-Ahead.
             if trade.stop_price and low <= trade.stop_price:
                 close_trade(trade, t, trade.stop_price * (1 - slip), "stop")
                 continue
@@ -205,6 +227,14 @@ def run_backtest(
             if snapshot.get("sma200") == snapshot.get("sma200"):  # Warmup fertig
                 if score(symbol, snapshot) <= -config.threshold:
                     close_trade(trade, t, close * (1 - slip), "signal")
+                    continue
+            # Überlebt → Trailing-Stop mit dem heutigen High nachziehen
+            # (greift erst ab morgen; Stop wird nie gesenkt)
+            if config.trailing_stop_atr > 0 and trade.entry_atr:
+                trade.high_water = max(trade.high_water, high)
+                trailed = trade.high_water - config.trailing_stop_atr * trade.entry_atr
+                if trade.stop_price is None or trailed > trade.stop_price:
+                    trade.stop_price = round(trailed, 6)
 
         # 3) Einstiegssignale auf Schlusskurs-Basis → morgen füllen
         candidates: list[tuple[float, str]] = []
@@ -219,6 +249,12 @@ def run_backtest(
             snapshot = row.to_dict()
             if snapshot.get("sma200") != snapshot.get("sma200"):
                 continue
+            # Regime-Filter: nur einsteigen, wenn der Wert über seiner
+            # SMA notiert (Momentum handelt keine Abwärtstrends)
+            if config.regime_sma:
+                ref = snapshot.get("sma50" if config.regime_sma <= 50 else "sma200")
+                if ref is None or ref != ref or snapshot["close"] <= ref:
+                    continue
             value = score(symbol, snapshot)
             if value >= config.threshold:
                 candidates.append((value, symbol))

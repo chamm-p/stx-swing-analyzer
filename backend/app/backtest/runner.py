@@ -34,6 +34,15 @@ AUTO_GRID = {
     "stop_atr_factor": [1.0, 1.5, 2.0],
 }  # 36 Kombinationen
 
+# Momentum-Variante: Trailing-Stop statt Fixziel, längere Horizonte —
+# Gewinner laufen lassen ist der Kern der Strategie
+MOMENTUM_GRID = {
+    "threshold": [0.3, 0.4, 0.5],
+    "trailing_stop_atr": [2.0, 3.0, 4.0],
+    "stop_atr_factor": [1.5, 2.0],
+    "horizon_days": [60, 120],
+}  # 36 Kombinationen
+
 
 def benchmark_symbol(segment: str | None) -> str:
     # Bei "+"-Gruppen (US+NASDAQ100) zählt das erste Segment
@@ -210,7 +219,9 @@ async def _execute(run_id: uuid.UUID) -> None:
                 if mode == "optimize":
                     # Auto-Optimierung: System-Grid + universumsgerechter
                     # Trade-Guard (kleine Universen erzeugen weniger Trades)
-                    grid = AUTO_GRID
+                    grid = (MOMENTUM_GRID
+                            if overrides.get("strategy_kind") == "momentum"
+                            else AUTO_GRID)
                     min_trades = min(min_trades, max(5, len(symbols) // 4))
                 base_params = StrategyConfig(**overrides).to_dict()
                 base_params.pop("fees", None)
