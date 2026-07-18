@@ -85,7 +85,9 @@ def _make_client(cfg: dict):
     oauth = OAuth1aConfig(
         access_token=str(cfg["access_token"]).strip(),
         access_token_secret=str(cfg["access_token_secret"]).strip(),
-        consumer_key=str(cfg["consumer_key"]).strip(),
+        # IBKR wandelt den Consumer-Key bei der Registrierung in
+        # Großbuchstaben — klein gesendet quittiert es mit "invalid consumer"
+        consumer_key=str(cfg["consumer_key"]).strip().upper(),
         dh_prime=dh_prime_from_pem(str(keys_dir / "dhparam.pem")),
         encryption_key_fp=str(keys_dir / "private_encryption.pem"),
         signature_key_fp=str(keys_dir / "private_signature.pem"),
