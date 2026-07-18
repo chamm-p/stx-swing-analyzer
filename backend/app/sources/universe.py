@@ -62,12 +62,38 @@ CRYPTO = [
 ]
 
 
+# Hongkong-Blue-Chips (Yahoo .HK) — Hang-Seng-nahes Universum. Bewusst
+# HK-gelistet (kein US-ADR-Mix): saubere Daten, ein Benchmark (^HSI),
+# eine Zeitzone/Währung. Statisch geseedet (der Wikipedia-Index-Refresh
+# fasst nur die westlichen Segmente an), über die UI erweiterbar.
+CHINA = [
+    ("0700.HK", "Tencent"), ("9988.HK", "Alibaba"), ("3690.HK", "Meituan"),
+    ("1299.HK", "AIA Group"), ("0939.HK", "China Construction Bank"),
+    ("1398.HK", "ICBC"), ("0005.HK", "HSBC"), ("0941.HK", "China Mobile"),
+    ("2318.HK", "Ping An"), ("0388.HK", "HKEX"), ("1810.HK", "Xiaomi"),
+    ("9618.HK", "JD.com"), ("2020.HK", "ANTA Sports"), ("0883.HK", "CNOOC"),
+    ("0857.HK", "PetroChina"), ("0386.HK", "Sinopec"), ("1211.HK", "BYD"),
+    ("0016.HK", "Sun Hung Kai Properties"), ("0011.HK", "Hang Seng Bank"),
+    ("2628.HK", "China Life"), ("0027.HK", "Galaxy Entertainment"),
+    ("0001.HK", "CK Hutchison"), ("0002.HK", "CLP Holdings"),
+    ("0003.HK", "HK & China Gas"), ("0006.HK", "Power Assets"),
+    ("0012.HK", "Henderson Land"), ("0066.HK", "MTR"), ("0175.HK", "Geely"),
+    ("0688.HK", "China Overseas Land"), ("0762.HK", "China Unicom"),
+    ("0823.HK", "Link REIT"), ("1038.HK", "CK Infrastructure"),
+    ("1093.HK", "CSPC Pharmaceutical"), ("1113.HK", "CK Asset"),
+    ("1177.HK", "Sino Biopharmaceutical"), ("1928.HK", "Sands China"),
+    ("2313.HK", "Shenzhou International"), ("2331.HK", "Li Ning"),
+    ("2382.HK", "Sunny Optical"), ("3988.HK", "Bank of China"),
+]
+
+
 async def seed_universe(db: AsyncSession) -> None:
     """Legt fehlende Universum-Symbole an (idempotent)."""
     result = await db.execute(select(UniverseSymbol.symbol))
     existing = {row[0] for row in result.all()}
     added = 0
-    for segment, entries in (("DAX", DAX), ("US", US), ("CRYPTO", CRYPTO)):
+    for segment, entries in (("DAX", DAX), ("US", US), ("CRYPTO", CRYPTO),
+                             ("CHINA", CHINA)):
         for symbol, name in entries:
             if symbol not in existing:
                 db.add(UniverseSymbol(symbol=symbol, name=name, segment=segment))

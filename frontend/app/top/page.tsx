@@ -30,6 +30,7 @@ const SEGMENTS: { key: string | null; label: string; title?: string }[] = [
   { key: "US+NASDAQ100", label: "US-Aktien", title: "S&P 500 + Nasdaq 100 (Large Caps)" },
   { key: "NASDAQ100", label: "Nasdaq 100", title: "Tech & Wachstum" },
   { key: "US_SMALL", label: "US Small Caps", title: "S&P SmallCap 600" },
+  { key: "CHINA", label: "China (HK)", title: "Hongkong-Blue-Chips (Hang Seng)" },
   { key: "DAX", label: "DAX" },
   { key: "MDAX", label: "MDAX", title: "Deutsche Mid Caps" },
   { key: "SDAX", label: "SDAX", title: "Deutsche Small Caps" },

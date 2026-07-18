@@ -176,6 +176,7 @@ export default function BacktestPage() {
               <option value="US+NASDAQ100">US-Aktien (S&P 500 + Nasdaq 100)</option>
               <option value="NASDAQ100">Nasdaq 100 (Tech)</option>
               <option value="US_SMALL">US Small Caps (S&P 600)</option>
+              <option value="CHINA">China (Hongkong / Hang Seng)</option>
               <option value="DAX">DAX</option>
               <option value="MDAX">MDAX</option>
               <option value="SDAX">SDAX</option>

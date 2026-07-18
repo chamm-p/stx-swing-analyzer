@@ -24,7 +24,7 @@ MAX_EQUITY_POINTS = 500
 BENCHMARKS = {
     "US": "SPY", "DAX": "^GDAXI", "CRYPTO": "BTC-USD",
     "NASDAQ100": "QQQ", "MDAX": "^MDAXI", "SDAX": "^SDAXI",
-    "EUROSTOXX": "^STOXX50E", "US_SMALL": "IWM",
+    "EUROSTOXX": "^STOXX50E", "US_SMALL": "IWM", "CHINA": "^HSI",
 }
 
 # Auto-Optimierung: das System erkundet den Parameterraum selbst
