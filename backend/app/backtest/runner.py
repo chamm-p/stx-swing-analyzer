@@ -43,6 +43,14 @@ MOMENTUM_GRID = {
     "horizon_days": [60, 120],
 }  # 36 Kombinationen
 
+# DTT-Variante: Einstieg ist fix (Golden Cross), variiert werden CRV-Ziel
+# und Break-even; der Rest der Regeln ist prescriptiv
+DTT_GRID = {
+    "target_r": [1.5, 2.0, 2.5, 3.0],
+    "breakeven_r": [0.0, 1.0],
+    "horizon_days": [180, 365],
+}  # 16 Kombinationen
+
 
 def benchmark_symbol(segment: str | None) -> str:
     # Bei "+"-Gruppen (US+NASDAQ100) zählt das erste Segment
@@ -219,8 +227,9 @@ async def _execute(run_id: uuid.UUID) -> None:
                 if mode == "optimize":
                     # Auto-Optimierung: System-Grid + universumsgerechter
                     # Trade-Guard (kleine Universen erzeugen weniger Trades)
-                    grid = (MOMENTUM_GRID
-                            if overrides.get("strategy_kind") == "momentum"
+                    kind = overrides.get("strategy_kind")
+                    grid = (MOMENTUM_GRID if kind == "momentum"
+                            else DTT_GRID if kind == "dtt"
                             else AUTO_GRID)
                     min_trades = min(min_trades, max(5, len(symbols) // 4))
                 base_params = StrategyConfig(**overrides).to_dict()

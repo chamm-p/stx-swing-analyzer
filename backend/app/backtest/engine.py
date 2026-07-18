@@ -43,11 +43,16 @@ def indicator_frame(df: pd.DataFrame) -> pd.DataFrame:
     out["macd_hist"] = hist
     out["macd_hist_prev"] = hist.shift(1)
     _, out["bb_upper"], out["bb_lower"] = bollinger(close)
+    out["sma20"] = close.rolling(20).mean()
+    out["sma20_prev"] = out["sma20"].shift(1)
     out["sma50"] = close.rolling(50).mean()
+    out["sma50_prev"] = out["sma50"].shift(1)
     out["sma200"] = close.rolling(200).mean()
+    out["ema200"] = close.ewm(span=200, adjust=False).mean()
     out["atr14"] = atr(df)
     out["high_60d"] = df["high"].rolling(60).max()
     out["low_60d"] = df["low"].rolling(60).min()
+    out["swing_low"] = df["low"].rolling(10).min()  # markantes Tief für DTT-Stop
     return out
 
 
@@ -67,6 +72,8 @@ class Trade:
     # Trailing-Stop (Momentum-Strategie): ATR beim Einstieg + Hochwasserstand
     entry_atr: float | None = None
     high_water: float = 0.0
+    # DTT: Risiko-Einheit (Einstieg − Stop) für R-Ziel und Break-even
+    risk_unit: float | None = None
 
     @property
     def pnl(self) -> float | None:
@@ -109,6 +116,10 @@ def run_backtest(
         if config.strategy_kind == "momentum":
             from app.analysis.scoring import momentum_score
             value, _ = momentum_score(snapshot)
+            return value
+        if config.strategy_kind == "dtt":
+            from app.analysis.scoring import dtt_score
+            value, _ = dtt_score(snapshot)
             return value
         value, _ = technical_score(snapshot, profile)
         return value
@@ -178,7 +189,22 @@ def run_backtest(
             if quantity <= 0:
                 continue
             atr_val = float(row["atr14"]) if row["atr14"] == row["atr14"] else None
-            if config.trailing_stop_atr > 0:
+            if config.strategy_kind == "dtt":
+                # DTT: Stop am markanten Swing-Low (Fallback knapp unter
+                # SMA50); Ziel als R-Vielfaches (CRV 1:target_r)
+                swing = float(row["swing_low"]) if row["swing_low"] == row["swing_low"] else None
+                stop = swing if (swing and swing < price) else None
+                if stop is None:
+                    s50 = float(row["sma50"]) if row["sma50"] == row["sma50"] else None
+                    stop = s50 * 0.995 if (s50 and s50 < price) else price * 0.95
+                risk = price - stop
+                target = price + config.target_r * risk if config.target_r > 0 else None
+                open_trades[symbol] = Trade(
+                    symbol=symbol, entry_date=t, entry_price=price,
+                    quantity=quantity, fee_buy=fee,
+                    target_price=target, stop_price=stop, risk_unit=risk,
+                )
+            elif config.trailing_stop_atr > 0:
                 # Momentum: kein Fixziel (Gewinner laufen lassen), Start-Stop
                 # unter dem Einstieg, danach zieht der Trailing-Stop nach
                 stop = price - config.stop_atr_factor * atr_val if atr_val else None
@@ -235,6 +261,13 @@ def run_backtest(
                 trailed = trade.high_water - config.trailing_stop_atr * trade.entry_atr
                 if trade.stop_price is None or trailed > trade.stop_price:
                     trade.stop_price = round(trailed, 6)
+            # DTT-Break-even: Stop auf Einstieg ziehen, sobald +breakeven_r × R
+            # erreicht ist (Risiko eliminiert; greift ebenfalls erst ab morgen)
+            if (config.strategy_kind == "dtt" and config.breakeven_r > 0
+                    and trade.risk_unit and trade.stop_price is not None
+                    and trade.stop_price < trade.entry_price
+                    and high >= trade.entry_price + config.breakeven_r * trade.risk_unit):
+                trade.stop_price = trade.entry_price
 
         # 3) Einstiegssignale auf Schlusskurs-Basis → morgen füllen
         candidates: list[tuple[float, str]] = []

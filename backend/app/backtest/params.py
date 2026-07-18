@@ -29,11 +29,15 @@ class StrategyConfig:
     stop_atr_factor: float = 1.5
     horizon_days: int = 14  # Kalendertage
 
-    # Strategie-Familie: "meanrev" (Live-Strategie: Schwäche kaufen,
-    # Fixziel) oder "momentum" (Stärke kaufen, Trailing-Stop, Regime-Filter)
+    # Strategie-Familie: "meanrev" (Schwäche kaufen, ATR-Fixziel),
+    # "momentum" (Stärke kaufen, Trailing-Stop) oder "dtt" (Dual-Timeframe
+    # Trendfolge: Golden-Cross-Einstieg, Stop am Swing-Low, R-Fixziel)
     strategy_kind: str = "meanrev"
     trailing_stop_atr: float = 0.0  # >0: Trailing-Stop in ATR, Fixziel aus
     regime_sma: int = 0             # >0: Einstieg nur wenn Close > SMA(n)
+    # DTT: Ziel als Vielfaches des Risikos (Einstieg−Stop); Break-even bei
+    target_r: float = 0.0           # >0: Ziel = Einstieg + target_r × R
+    breakeven_r: float = 0.0        # >0: Stop → Einstieg, sobald +breakeven_r × R
 
     # Portfolio-Regeln (wie Auto-Trader)
     start_capital: float = 10_000.0

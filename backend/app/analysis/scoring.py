@@ -284,3 +284,36 @@ def momentum_score(snapshot: dict) -> tuple[float, dict]:
 
     total = max(-1.0, min(1.0, sum(comps.values())))
     return round(total, 4), comps
+
+
+def dtt_score(snapshot: dict) -> tuple[float, dict]:
+    """Dual-Timeframe Trendfolge (DTT): diskretes Einstiegssignal statt
+    kontinuierlichem Momentum — feuert selten, vermeidet Whipsaw.
+
+    Einstieg (+1.0), wenn ALLE Bedingungen gleichzeitig:
+    - Trend: Kurs > EMA200 (übergeordneter Bullenmarkt)
+    - Signal: SMA20 kreuzt SMA50 von unten (kleiner Golden Cross HEUTE)
+    - Bestätigung: 50 < RSI(14) < 70 (Momentum, aber nicht überkauft)
+
+    Trendbruch-Exit (-1.0): Kurs < EMA200 ODER SMA20 < SMA50 —
+    löst über das Signal-Exit der Engine die Glattstellung aus.
+    """
+    close = snapshot.get("close")
+    ema200 = snapshot.get("ema200")
+    sma20, sma50 = snapshot.get("sma20"), snapshot.get("sma50")
+    sma20_p, sma50_p = snapshot.get("sma20_prev"), snapshot.get("sma50_prev")
+    rsi = snapshot.get("rsi14")
+    if None in (close, ema200, sma20, sma50, sma20_p, sma50_p, rsi):
+        return 0.0, {}
+    if any(v != v for v in (ema200, sma20, sma50, sma20_p, sma50_p, rsi)):
+        return 0.0, {}
+
+    # Trendbruch schlägt alles → Exit
+    if close < ema200 or sma20 < sma50:
+        return -1.0, {"trend_break": True}
+
+    crossed_up = sma20_p <= sma50_p and sma20 > sma50
+    rsi_ok = 50 < rsi < 70
+    if close > ema200 and crossed_up and rsi_ok:
+        return 1.0, {"trend": True, "golden_cross": True, "rsi": round(rsi, 1)}
+    return 0.0, {}

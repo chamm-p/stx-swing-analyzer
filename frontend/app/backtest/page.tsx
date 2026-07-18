@@ -41,7 +41,7 @@ export default function BacktestPage() {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [platforms, setPlatforms] = useState<{ id: number; name: string }[]>([]);
   const [segment, setSegment] = useState("US+NASDAQ100");
-  const [strategyKind, setStrategyKind] = useState<"meanrev" | "momentum">("meanrev");
+  const [strategyKind, setStrategyKind] = useState<"meanrev" | "momentum" | "dtt">("meanrev");
   const [maxSymbols, setMaxSymbols] = useState("0");
   const [days, setDays] = useState("730");
   const [backfill, setBackfill] = useState(false);
@@ -97,6 +97,11 @@ export default function BacktestPage() {
       allParams.regime_sma = 200;                 // nur über SMA200 einsteigen
       if (!allParams.trailing_stop_atr) allParams.trailing_stop_atr = 3.0;
       if (mode !== "optimize" && !params.horizon_days) allParams.horizon_days = 90;
+    } else if (strategyKind === "dtt") {
+      allParams.strategy_kind = "dtt";
+      if (!allParams.target_r) allParams.target_r = 2.0;      // CRV 1:2
+      if (!allParams.breakeven_r) allParams.breakeven_r = 1.0; // BE bei 1:1
+      if (mode !== "optimize" && !params.horizon_days) allParams.horizon_days = 365;
     }
     try {
       const res = await api.post("/api/backtest/run", {
@@ -185,6 +190,7 @@ export default function BacktestPage() {
               title="Mean-Reversion: Schwäche kaufen, ATR-Fixziel (Live-Strategie). Momentum: Stärke kaufen, Trailing-Stop, nur über SMA200.">
               <option value="meanrev">Mean-Reversion (Live)</option>
               <option value="momentum">Momentum (Trailing-Stop)</option>
+              <option value="dtt">Dual-Timeframe Trendfolge (DTT)</option>
             </select>
           </Field>
           <Field label="Stichprobe (0 = alle)">
