@@ -127,13 +127,21 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
         # drosselt Reddit streng — bis der Abstand um ist, still überspringen
         # (kein Fehler, kein Commit; der letzte Stand bleibt sichtbar).
         # Zusätzlich eine GLOBALE Schranke: nur EINE Reddit-Anfrage pro
-        # Halbintervall — zwei Subreddits im selben Sync-Durchgang lösen
-        # sonst sofort 429 aus; so wechseln sich die Quellen ab.
+        # Intervall, über alle Quellen.
         from app.config import get_settings
+        interval_min = max(get_settings().reddit_rss_interval_min, 30)
         spacing_key = f"rss:spacing:{source.id}"
         global_key = "rss:spacing:reddit-global"
         if await r.exists(spacing_key) or await r.exists(global_key):
+            if source.last_error:
+                # Alter 429-Text wäre irreführend — wir warten nur planmäßig
+                source.last_error = None
+                await db.commit()
             return 0
+        # Slot SOFORT belegen — auch ein 429-Versuch ist eine Anfrage.
+        # Sonst laufen die Cooldowns beider Quellen synchron ab und beide
+        # feuern im selben Sync-Durchgang erneut gleichzeitig.
+        await r.set(global_key, "1", ex=interval_min * 60)
 
     async def _get() -> bytes:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True,
@@ -162,15 +170,13 @@ async def fetch_source(db: AsyncSession, source: DataSource) -> int:
         return 0
 
     if subreddit:
-        # Erfolgreicher Abruf → globale Schranke übers VOLLE Intervall:
-        # empirisch kassiert selbst eine Solo-Anfrage nach 90 Min noch 429;
-        # Reddit toleriert von uns offenbar nur ~1 Anfrage pro 2h. Die
-        # Quellen wechseln sich damit ab (je Subreddit ~alle 4h — für
-        # Foren-Sentiment völlig ausreichend).
+        # Erfolgreicher Abruf → diese Quelle pausiert das volle Intervall
+        # (die globale Schranke wurde schon beim Versuch gesetzt); je
+        # Subreddit ergibt das ~alle 4h einen Abruf — für Foren-Sentiment
+        # völlig ausreichend.
         from app.config import get_settings as _gs
         interval_min = max(_gs().reddit_rss_interval_min, 30)
         await r.set(f"rss:spacing:{source.id}", "1", ex=interval_min * 60)
-        await r.set("rss:spacing:reddit-global", "1", ex=interval_min * 60)
 
     feed = await asyncio.to_thread(feedparser.parse, raw)
     entries = [{
