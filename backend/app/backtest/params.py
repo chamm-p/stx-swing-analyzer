@@ -45,10 +45,14 @@ class StrategyConfig:
     max_positions: int = 10
     cooldown_days: int = 3
 
+    # Zeitrahmen: "daily" (Standard) oder "weekly" (Wochenkerzen —
+    # weniger Rauschen; Indikator-Fenster gelten dann in Wochen)
+    timeframe: str = "daily"
+
     # Ausführung
     slippage_bps: float = 5.0  # 0.05% je Fill
     fees: dict | None = None   # Plattform-Staffel ({"default": [...]}) oder None
-    warmup_days: int = 210     # Handelstage bis SMA200 & Co. stabil sind
+    warmup_days: int = 210     # Bars bis SMA200 & Co. stabil sind
 
     def profile(self) -> ScoringProfile:
         return ScoringProfile(

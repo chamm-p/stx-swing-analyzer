@@ -43,6 +43,7 @@ export default function BacktestPage() {
   const [segment, setSegment] = useState("US+NASDAQ100");
   const [strategyKind, setStrategyKind] = useState<"meanrev" | "momentum" | "dtt">("meanrev");
   const [maxSymbols, setMaxSymbols] = useState("0");
+  const [timeframe, setTimeframe] = useState<"daily" | "weekly">("daily");
   const [days, setDays] = useState("730");
   const [backfill, setBackfill] = useState(false);
   const [platformId, setPlatformId] = useState<number | "">("");
@@ -92,6 +93,7 @@ export default function BacktestPage() {
     }
     const mts = parseFloat(minTrainScore.replace(",", "."));
     const allParams: Record<string, any> = { ...params };
+    if (timeframe === "weekly") allParams.timeframe = "weekly";
     if (strategyKind === "momentum") {
       allParams.strategy_kind = "momentum";
       allParams.regime_sma = 200;                 // nur über SMA200 einsteigen
@@ -198,6 +200,14 @@ export default function BacktestPage() {
             <input value={maxSymbols} onChange={(e) => setMaxSymbols(e.target.value)}
               className={inputCls}
               title="Große Segmente (S&P 600): reproduzierbare Zufalls-Stichprobe (Seed 42) — spart Stunden Rechenzeit" />
+          </Field>
+          <Field label="Zeitrahmen">
+            <select value={timeframe} onChange={(e) => setTimeframe(e.target.value as any)}
+              className={inputCls}
+              title="Wochenkerzen: weniger Rauschen, längere Warmup-Phase (SMA200 = 200 Wochen). Indikator-Fenster gelten dann in Wochen.">
+              <option value="daily">Tageskerzen</option>
+              <option value="weekly">Wochenkerzen</option>
+            </select>
           </Field>
           <Field label="Zeitraum">
             <select value={days} onChange={(e) => setDays(e.target.value)} className={inputCls}>

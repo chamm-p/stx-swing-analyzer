@@ -58,6 +58,17 @@ def benchmark_symbol(segment: str | None) -> str:
     return BENCHMARKS.get(first, "SPY")
 
 
+def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
+    """Tageskerzen → Wochenkerzen (Freitag-Ende): OHLC korrekt aggregieren."""
+    if df.empty:
+        return df
+    weekly = df.resample("W-FRI").agg({
+        "open": "first", "high": "max", "low": "min",
+        "close": "last", "volume": "sum",
+    }).dropna(subset=["close"])
+    return weekly
+
+
 def _downsample(series) -> list[dict]:
     step = max(len(series) // MAX_EQUITY_POINTS, 1)
     points = series.iloc[::step]
@@ -206,10 +217,17 @@ async def _execute(run_id: uuid.UUID) -> None:
                     except Exception as e:
                         logger.warning("Backfill %s fehlgeschlagen: %s", symbol, e)
 
+            # Wochen-Timeframe: Tageskerzen zu Wochenkerzen aggregieren
+            # (weniger Rauschen; Indikator-Fenster gelten dann in Wochen)
+            weekly = str(overrides.get("timeframe") or "daily") == "weekly"
+            min_bars = 60 if weekly else 250
+
             data, currencies = {}, {}
             for symbol in symbols:
                 df = await load_ohlcv_df(db, symbol, days=run.days)
-                if len(df) > 250:
+                if weekly:
+                    df = _to_weekly(df)
+                if len(df) > min_bars:
                     data[symbol] = df
                     asset = await db.get(Asset, symbol)
                     if asset and asset.currency:

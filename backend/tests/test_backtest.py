@@ -268,3 +268,24 @@ class TestIntegrationEchtesScoring:
         assert abs(float(result.equity.iloc[-1]) - (result.cash_final + open_value)) < 1.0
         metrics = compute_metrics(result)
         assert "total_return_pct" in metrics
+
+
+def test_weekly_resampling():
+    """Tageskerzen → Wochenkerzen: OHLC korrekt aggregiert, Volumen summiert."""
+    from app.backtest.runner import _to_weekly
+
+    # 3 volle Wochen (Mo–Fr), steigende Kurse
+    idx = pd.date_range("2024-01-01", periods=15, freq="B")  # 3 Wochen à 5 Tage
+    df = pd.DataFrame({
+        "open": range(15), "high": [i + 2 for i in range(15)],
+        "low": [i - 1 for i in range(15)], "close": range(15),
+        "volume": [100] * 15,
+    }, index=idx).astype(float)
+    w = _to_weekly(df)
+    assert len(w) == 3
+    # Erste Woche (Tage 0–4): open=erster, close=letzter, high=max, low=min
+    assert w.iloc[0]["open"] == 0.0
+    assert w.iloc[0]["close"] == 4.0
+    assert w.iloc[0]["high"] == 6.0   # max(high) = 4+2
+    assert w.iloc[0]["low"] == -1.0   # min(low) = 0-1
+    assert w.iloc[0]["volume"] == 500.0  # 5×100
