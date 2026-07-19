@@ -27,7 +27,7 @@ export default function PortfoliosPage() {
   const [kind, setKind] = useState<"real" | "trial" | "auto">("real");
   const [platforms, setPlatforms] = useState<{ id: number; name: string }[]>([]);
   const [platformId, setPlatformId] = useState<number | "">("");
-  const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", risk_pct: "1", min_crv: "1.5", use_screener: true });
+  const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", risk_pct: "1", min_crv: "1.5", use_screener: true, execution: "paper", ibkr_sync: false });
   const [startCapital, setStartCapital] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -51,7 +51,11 @@ export default function PortfoliosPage() {
           max_per_trade: parseFloat(cfg.max_per_trade.replace(",", ".")),
           max_positions: parseInt(cfg.max_positions),
           min_confidence: parseFloat(cfg.min_confidence.replace(",", ".")),
+          risk_pct: parseFloat(cfg.risk_pct.replace(",", ".")),
+          min_crv: parseFloat(cfg.min_crv.replace(",", ".")),
           use_screener: cfg.use_screener,
+          execution: cfg.execution,
+          ibkr_sync: cfg.execution !== "paper" ? true : cfg.ibkr_sync,
           enabled: true,
         };
       }
@@ -123,8 +127,19 @@ export default function PortfoliosPage() {
                 onChange={(e) => setCfg({ ...cfg, use_screener: e.target.checked })} />
               Screener-Signale handeln
             </label>
+            <label className="flex flex-col text-xs text-slate-400">
+              Ausführung
+              <select value={cfg.execution} onChange={(e) => setCfg({ ...cfg, execution: e.target.value })}
+                className="mt-0.5 w-52 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100">
+                <option value="paper">Paper (simuliert, kein echtes Geld)</option>
+                <option value="manual">IBKR manuell (nur Vorschläge)</option>
+                <option value="ibkr">IBKR automatisch (echte Orders) ⚠️</option>
+              </select>
+            </label>
             <span className="w-full text-xs text-slate-500">
-              Paper-Trading: Das System kauft BUY-Signale und verkauft bei SELL-Signal oder Horizont-Ablauf. Kein echtes Geld.
+              {cfg.execution === "paper" && "Simuliert: kauft BUY-Signale, verkauft bei SELL/Horizont. Kein echtes Geld."}
+              {cfg.execution === "manual" && "IBKR-synchronisiert: das System schlägt Trades vor (Telegram/E-Mail), du führst sie im Kauf-/Verkauf-Dialog aus."}
+              {cfg.execution === "ibkr" && "⚠️ ECHTE Orders: das System handelt automatisch über IBKR. Zusätzlich muss „Orders erlauben" in den IBKR-Einstellungen aktiv sein."}
             </span>
           </div>
         )}
@@ -142,7 +157,27 @@ export default function PortfoliosPage() {
                 {(KIND_BADGE[p.kind] || KIND_BADGE.real).label}
               </span>
             </div>
-            {p.kind === "real" && (
+            {p.kind === "auto" && (
+              <div className="mt-1 flex items-center gap-2 text-xs">
+                <span className="text-slate-500">Ausführung:</span>
+                <select value={p.config?.execution || "paper"}
+                  onChange={async (e) => {
+                    const v = e.target.value;
+                    if (v === "ibkr" && !confirm(`„${p.name}" auf ECHTE automatische IBKR-Orders umstellen?\n\nDas System handelt dann selbstständig mit echtem Geld (zusätzlich muss „Orders erlauben" in den IBKR-Einstellungen aktiv sein).`)) return;
+                    await api.patch(`/api/portfolios/${p.id}`, {
+                      config: { ...p.config, execution: v,
+                        ibkr_sync: v !== "paper" ? true : !!p.config?.ibkr_sync },
+                    });
+                    load();
+                  }}
+                  className={`rounded border bg-slate-900 px-2 py-0.5 ${p.config?.execution === "ibkr" ? "border-amber-600 text-amber-400" : "border-slate-700 text-slate-300"}`}>
+                  <option value="paper">Paper</option>
+                  <option value="manual">IBKR manuell</option>
+                  <option value="ibkr">IBKR automatisch ⚠️</option>
+                </select>
+              </div>
+            )}
+            {(p.kind === "real" || p.kind === "auto") && (
               <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
                 <label className="flex items-center gap-1"
                   title="IBKR-Bestände automatisch spiegeln (stündlich, read-only): neue Positionen mit echtem Einstand, extern Verkauftes wird geschlossen, Cash übernommen">

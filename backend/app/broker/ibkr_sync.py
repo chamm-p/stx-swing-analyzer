@@ -107,7 +107,8 @@ async def _reconcile(db: AsyncSession, pf: Portfolio, state: dict) -> dict:
 
 async def sync_ibkr_portfolios(db: AsyncSession) -> dict:
     """Alle verknüpften Portfolios (config.ibkr_sync) abgleichen."""
-    result = await db.execute(select(Portfolio).where(Portfolio.kind == "real"))
+    result = await db.execute(
+        select(Portfolio).where(Portfolio.kind.in_(("real", "auto"))))
     linked = [pf for pf in result.scalars().all()
               if (pf.config or {}).get("ibkr_sync")]
     if not linked:

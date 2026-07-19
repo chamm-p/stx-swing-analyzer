@@ -100,16 +100,42 @@ async def _strategy_score(db: AsyncSession, symbol: str, strategy: dict) -> floa
     return score
 
 
-async def _run_exits(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
+class _TradingDisabled(Exception):
+    """IBKR-Trading global deaktiviert — Auto-Order nicht ausführbar."""
+
+
+async def _ibkr_execute(db: AsyncSession, symbol: str, side: str, quantity: float,
+                        currency: str | None, take_profit: float | None = None,
+                        stop_loss: float | None = None) -> dict:
+    """Echte IBKR-Order für den Auto-Trader. PermissionError → _TradingDisabled."""
+    from app.broker import ibkr
+
+    try:
+        return await ibkr.place_order(
+            db, symbol=symbol, side=side, quantity=quantity, order_type="MKT",
+            take_profit=take_profit, stop_loss=stop_loss, currency=currency)
+    except PermissionError as e:
+        raise _TradingDisabled(str(e))
+
+
+async def _run_exits(db: AsyncSession, pf: Portfolio, cfg: dict,
+                     proposals: list | None = None) -> int:
     """Exit-Prioritäten: Stop-Loss → Take-Profit → Exit-Signal → Horizont.
 
-    Grundlage sind Tagesschlusskurse (Paper-Trading) — Stop/Ziel werden
-    also am Close geprüft, nicht intraday. Challenger-Portfolios nutzen
-    ihr eigenes Scoring statt der globalen SELL-Signale."""
+    Grundlage sind Tagesschlusskurse — Stop/Ziel werden am Close geprüft,
+    nicht intraday. Ausführung je nach cfg["execution"]: paper (simuliert),
+    manual (nur Vorschlag) oder ibkr (echte SELL-Order)."""
     from app.analysis.fees import portfolio_fee
     from app.models import Asset
 
     strategy = cfg.get("strategy")
+    execution = cfg.get("execution", "paper")
+
+    # Im IBKR-Auto-Modus verwaltet die Bracket-Order (Ziel/Stop, beim Kauf
+    # platziert) die Exits direkt bei IBKR — unser Trader mischt sich nicht
+    # ein (verhindert Doppel-Verkauf und Konflikte mit dem Bestands-Sync).
+    if execution == "ibkr":
+        return 0
 
     closed = 0
     for p in await _open_positions(db, pf.id):
@@ -120,35 +146,53 @@ async def _run_exits(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
         fee = await portfolio_fee(db, pf, asset.currency if asset else None,
                                   price * p.quantity, quantity=p.quantity)
 
+        # Exit-Grund ermitteln (Prioritäten)
+        reason = None
         if p.stop_price and price <= p.stop_price:
-            _do_close(pf, p, price, f"Stop-Loss ({p.stop_price}) erreicht", fee)
-            closed += 1
-            continue
-        if p.target_price and price >= p.target_price:
-            _do_close(pf, p, price, f"Kursziel ({p.target_price}) erreicht", fee)
-            closed += 1
+            reason = f"Stop-Loss ({p.stop_price}) erreicht"
+        elif p.target_price and price >= p.target_price:
+            reason = f"Kursziel ({p.target_price}) erreicht"
+        else:
+            horizon = p.horizon_days or 14
+            if utcnow() >= p.entry_date + timedelta(days=horizon):
+                reason = f"Horizont ({horizon}d) abgelaufen"
+            elif strategy:
+                score = await _strategy_score(db, p.symbol, strategy)
+                if score is not None and score <= -float(strategy.get("threshold", 0.35)):
+                    reason = f"Strategie-Exit (Score {score:+.2f})"
+            else:
+                sell = await db.scalar(
+                    select(Signal).where(
+                        Signal.symbol == p.symbol, Signal.action == "SELL",
+                        Signal.ts > p.entry_date,
+                    ).order_by(desc(Signal.ts)).limit(1))
+                if sell is not None:
+                    reason = "SELL-Signal"
+        if not reason:
             continue
 
-        horizon = p.horizon_days or 14
-        if utcnow() >= p.entry_date + timedelta(days=horizon):
-            _do_close(pf, p, price, f"Horizont ({horizon}d) abgelaufen", fee)
-            closed += 1
+        if execution == "manual":
+            if proposals is not None:
+                proposals.append(f"VERKAUFEN {p.quantity} × {p.symbol} @ ~{round(price, 2)} "
+                                 f"— {reason}")
             continue
-        if strategy:
-            score = await _strategy_score(db, p.symbol, strategy)
-            if score is not None and score <= -float(strategy.get("threshold", 0.35)):
-                _do_close(pf, p, price, f"Strategie-Exit (Score {score:+.2f})", fee)
-                closed += 1
-            continue
-        sell_signal = await db.scalar(
-            select(Signal).where(
-                Signal.symbol == p.symbol, Signal.action == "SELL",
-                Signal.ts > p.entry_date,
-            ).order_by(desc(Signal.ts)).limit(1)
-        )
-        if sell_signal is not None:
-            _do_close(pf, p, price, "SELL-Signal", fee)
-            closed += 1
+        exit_price = price
+        if execution == "ibkr":
+            try:
+                order = await _ibkr_execute(db, p.symbol, "SELL", p.quantity,
+                                            asset.currency if asset else None)
+                exit_price = order.get("avg_fill_price") or price
+                reason += " [IBKR]"
+            except _TradingDisabled:
+                logger.warning("Auto-Portfolio %s: IBKR-Trading aus — Verkauf %s "
+                               "nicht ausgeführt", pf.name, p.symbol)
+                continue
+            except Exception as e:
+                logger.error("Auto-Portfolio %s: IBKR-Verkauf %s fehlgeschlagen: %s",
+                             pf.name, p.symbol, e)
+                continue
+        _do_close(pf, p, exit_price, reason, fee)
+        closed += 1
     return closed
 
 
@@ -250,13 +294,15 @@ async def _buy_candidates(db: AsyncSession, cfg: dict) -> list[dict]:
     return unique
 
 
-async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
+async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict,
+                       proposals: list | None = None) -> int:
     open_pos = await _open_positions(db, pf.id)
     held = {p.symbol for p in open_pos}
     slots = cfg["max_positions"] - len(open_pos)
     if slots <= 0:
         return 0
 
+    execution = cfg.get("execution", "paper")
     # Basis für die 1%-Regel: aktueller Gesamtwert (Cash + Positionen)
     total_value = await portfolio_market_value(db, pf, open_pos)
 
@@ -322,20 +368,47 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict) -> int:
         if quantity <= 0:
             continue
 
+        # Manuell: nur vorschlagen, nichts ausführen
+        if execution == "manual":
+            if proposals is not None:
+                proposals.append(f"KAUFEN {quantity} × {symbol} @ ~{round(price, 2)} "
+                                 f"(Ziel {target_price}, Stop {stop_price}) — {cand['origin']}")
+            held.add(symbol)
+            slots -= 1
+            continue
+
+        entry_price, src = price, "auto"
+        if execution == "ibkr":
+            try:
+                order = await _ibkr_execute(
+                    db, symbol, "BUY", quantity, asset.currency if asset else None,
+                    take_profit=target_price, stop_loss=stop_price)
+            except _TradingDisabled:
+                logger.warning("Auto-Portfolio %s: IBKR-Trading aus — Käufe gestoppt", pf.name)
+                break
+            except Exception as e:
+                logger.error("Auto-Portfolio %s: IBKR-Kauf %s fehlgeschlagen: %s",
+                             pf.name, symbol, e)
+                continue
+            entry_price = order.get("avg_fill_price") or price
+            src = "ibkr_auto"
+
         db.add(Position(
             portfolio_id=pf.id, symbol=symbol, quantity=quantity,
-            entry_price=price, source="auto", signal_id=cand["signal_id"],
+            entry_price=entry_price, source=src, signal_id=cand["signal_id"],
             horizon_days=cand["horizon_days"],
             target_price=target_price, stop_price=stop_price, fee_buy=fee,
             notes=f"Auto-Kauf ({cand['origin']}, Rank {cand['rank']:+.2f}, "
-                  f"Ziel {target_price}, Stop {stop_price})",
+                  f"Ziel {target_price}, Stop {stop_price}"
+                  + (", IBKR" if src == "ibkr_auto" else "") + ")",
         ))
-        pf.cash -= quantity * price + fee
+        pf.cash -= quantity * entry_price + fee
         held.add(symbol)
         slots -= 1
         opened += 1
-        logger.info("Auto-Portfolio %s: %s gekauft (%.6f Stk. zu %.4f, %s)",
-                    pf.name, symbol, quantity, price, cand["origin"])
+        logger.info("Auto-Portfolio %s: %s gekauft (%.6f Stk. zu %.4f, %s%s)",
+                    pf.name, symbol, quantity, entry_price, cand["origin"],
+                    " [IBKR]" if src == "ibkr_auto" else "")
     return opened
 
 
@@ -354,11 +427,49 @@ async def run_auto_portfolios(db: AsyncSession) -> dict:
                **(pf.config or {})}
         if not cfg.get("enabled", True):
             continue
+        proposals: list[str] = []
         try:
-            stats["closed"] += await _run_exits(db, pf, cfg)
-            stats["opened"] += await _run_entries(db, pf, cfg)
+            stats["closed"] += await _run_exits(db, pf, cfg, proposals)
+            stats["opened"] += await _run_entries(db, pf, cfg, proposals)
             await db.commit()
         except Exception:
             await db.rollback()
             logger.exception("Auto-Trading für Portfolio %s fehlgeschlagen", pf.name)
+            continue
+        if proposals:  # execution="manual" → Vorschläge per Alert
+            await _notify_proposals(db, pf, proposals)
     return stats
+
+
+async def _notify_proposals(db: AsyncSession, pf: Portfolio, proposals: list[str]) -> None:
+    """Manual-Modus: vorgeschlagene Trades melden (Telegram/E-Mail).
+    24h-Dedupe verhindert stündliche Wiederholung desselben Vorschlags."""
+    import asyncio
+    import hashlib
+
+    from app.alerts.dispatcher import send_email_sync, send_telegram
+    from app.services_redis import get_redis
+    from app.services_settings import load_settings
+
+    digest = hashlib.sha256("|".join(sorted(proposals)).encode()).hexdigest()[:16]
+    key = f"proposals:{pf.id}:{digest}"
+    r = get_redis()
+    if await r.get(key):
+        return
+    await r.set(key, "1", ex=86400)
+
+    text = (f"📋 Handelsvorschläge für {pf.name} (manuell):\n"
+            + "\n".join(f"• {p}" for p in proposals)
+            + "\n\nAusführen über den Kauf-/Verkauf-Dialog (routet zu IBKR).")
+    comm = await load_settings(db, "comm")
+    if comm.get("telegram_bot_token") and comm.get("telegram_chat_id"):
+        try:
+            await send_telegram(comm, text)
+        except Exception as e:
+            logger.error("Vorschlags-Telegram fehlgeschlagen: %s", e)
+    if comm.get("smtp_host") and comm.get("alert_email_to"):
+        try:
+            await asyncio.to_thread(send_email_sync, comm,
+                                    f"[stx] Handelsvorschläge {pf.name}", text)
+        except Exception as e:
+            logger.error("Vorschlags-E-Mail fehlgeschlagen: %s", e)

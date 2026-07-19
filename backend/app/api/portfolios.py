@@ -28,6 +28,11 @@ class AutoConfig(BaseModel):
     min_crv: float = Field(default=1.5, ge=0, le=10)    # Mindest-CRV
     use_screener: bool = True
     enabled: bool = True
+    # Ausführung: "paper" (simuliert), "manual" (IBKR — nur Vorschläge per
+    # Alert, keine Order) oder "ibkr" (echte Orders automatisch, gated durch
+    # den globalen „Orders erlauben"-Schalter)
+    execution: str = Field(default="paper", pattern="^(paper|manual|ibkr)$")
+    ibkr_sync: bool = False  # IBKR-Bestände in dieses Portfolio spiegeln
 
 
 class PortfolioCreate(BaseModel):
@@ -273,9 +278,9 @@ async def update_portfolio(portfolio_id: int, payload: PortfolioUpdate,
         portfolio.config = cfg
         portfolio.cash += payload.start_capital - old
     if payload.ibkr_sync is not None:
-        if portfolio.kind != "real":
+        if portfolio.kind not in ("real", "auto"):
             raise HTTPException(status_code=422,
-                                detail="IBKR-Sync nur für echte Portfolios")
+                                detail="IBKR-Sync nur für echte oder Auto-Portfolios")
         portfolio.config = {**(portfolio.config or {}), "ibkr_sync": payload.ibkr_sync}
     if payload.config is not None and portfolio.kind == "auto":
         merged = payload.config.model_dump()
@@ -293,8 +298,9 @@ async def ibkr_sync_now(portfolio_id: int, db: AsyncSession = Depends(get_db)):
     portfolio = await db.get(Portfolio, portfolio_id)
     if not portfolio:
         raise HTTPException(status_code=404, detail="Portfolio nicht gefunden")
-    if portfolio.kind != "real":
-        raise HTTPException(status_code=422, detail="IBKR-Sync nur für echte Portfolios")
+    if portfolio.kind not in ("real", "auto"):
+        raise HTTPException(status_code=422,
+                            detail="IBKR-Sync nur für echte oder Auto-Portfolios")
     try:
         state = await fetch_ibkr_state(db)
     except Exception as e:

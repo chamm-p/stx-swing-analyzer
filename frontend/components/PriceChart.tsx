@@ -85,5 +85,39 @@ export default function PriceChart({
   if (candles.length === 0) {
     return <div className="flex h-[420px] items-center justify-center text-slate-500">Noch keine Kursdaten</div>;
   }
-  return <div ref={containerRef} className="w-full" />;
+
+  // Legende: nur Kurven zeigen, die auch Daten haben
+  const legend: { label: string; color: string; dash?: boolean }[] = [];
+  if (indicators.sma20?.length) legend.push({ label: "SMA 20", color: "#38bdf8" });
+  if (indicators.sma50?.length) legend.push({ label: "SMA 50", color: "#a78bfa" });
+  if (indicators.sma200?.length) legend.push({ label: "SMA 200", color: "#f59e0b" });
+  if (indicators.bb_upper?.length || indicators.bb_lower?.length)
+    legend.push({ label: "Bollinger-Bänder", color: "#64748b", dash: true });
+
+  return (
+    <div className="w-full">
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-3 rounded-sm bg-emerald-500" />
+          <span className="inline-block h-2 w-3 rounded-sm bg-rose-500" />
+          Kerzen (grün steigend / rot fallend)
+        </span>
+        {legend.map((l) => (
+          <span key={l.label} className="flex items-center gap-1.5">
+            <span className="inline-block h-0.5 w-5" style={{
+              background: l.dash
+                ? `repeating-linear-gradient(90deg, ${l.color} 0 3px, transparent 3px 6px)`
+                : l.color,
+            }} />
+            {l.label}
+          </span>
+        ))}
+        <span className="flex items-center gap-1">
+          <span className="text-emerald-400">▲</span>/<span className="text-rose-400">▼</span>
+          Signal (BUY / SELL)
+        </span>
+      </div>
+      <div ref={containerRef} className="w-full" />
+    </div>
+  );
 }
