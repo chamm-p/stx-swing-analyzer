@@ -177,24 +177,26 @@ export default function WatchlistPage() {
                         <span className="text-xs text-slate-600" title="Alerts über den Beobachten-Schalter am Portfolio">an*</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-right">
-                      {rowStatus[item.symbol] && (
-                        <span className="mr-2 text-xs text-amber-400">{rowStatus[item.symbol]}</span>
-                      )}
-                      <button onClick={() => analyze(item.symbol)}
-                        className="mr-2 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-amber-500"
-                        title="Sofort analysieren">
-                        ⚡
-                      </button>
-                      {item.source === "watchlist" ? (
-                        <button onClick={() => remove(item.symbol)}
-                          className="rounded border border-slate-700 px-2 py-1 text-xs text-rose-400 hover:border-rose-500"
-                          title="Von der Watchlist entfernen">
-                          ✕
+                    <td className="whitespace-nowrap px-3 py-2 text-right">
+                      <div className="inline-flex items-center justify-end gap-1">
+                        {rowStatus[item.symbol] && (
+                          <span className="mr-1 max-w-[9rem] truncate text-xs text-amber-400">{rowStatus[item.symbol]}</span>
+                        )}
+                        <button onClick={() => analyze(item.symbol)}
+                          className="w-8 rounded border border-slate-700 py-1 text-center text-sm hover:border-amber-500"
+                          title="Sofort analysieren">
+                          ⚡
                         </button>
-                      ) : (
-                        <span className="inline-block w-7" title="Über den Beobachten-Schalter am Portfolio steuerbar" />
-                      )}
+                        {item.source === "watchlist" ? (
+                          <button onClick={() => remove(item.symbol)}
+                            className="w-8 rounded border border-slate-700 py-1 text-center text-sm text-rose-400 hover:border-rose-500"
+                            title="Von der Watchlist entfernen">
+                            ✕
+                          </button>
+                        ) : (
+                          <span className="inline-block w-8" title="Über den Beobachten-Schalter am Portfolio steuerbar" />
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
