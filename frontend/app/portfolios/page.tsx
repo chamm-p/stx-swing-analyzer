@@ -139,7 +139,7 @@ export default function PortfoliosPage() {
             <span className="w-full text-xs text-slate-500">
               {cfg.execution === "paper" && "Simuliert: kauft BUY-Signale, verkauft bei SELL/Horizont. Kein echtes Geld."}
               {cfg.execution === "manual" && "IBKR-synchronisiert: das System schlägt Trades vor (Telegram/E-Mail), du führst sie im Kauf-/Verkauf-Dialog aus."}
-              {cfg.execution === "ibkr" && "⚠️ ECHTE Orders: das System handelt automatisch über IBKR. Zusätzlich muss „Orders erlauben" in den IBKR-Einstellungen aktiv sein."}
+              {cfg.execution === "ibkr" && "⚠️ ECHTE Orders: das System handelt automatisch über IBKR. Zusätzlich muss „Orders erlauben“ in den IBKR-Einstellungen aktiv sein."}
             </span>
           </div>
         )}
@@ -163,7 +163,7 @@ export default function PortfoliosPage() {
                 <select value={p.config?.execution || "paper"}
                   onChange={async (e) => {
                     const v = e.target.value;
-                    if (v === "ibkr" && !confirm(`„${p.name}" auf ECHTE automatische IBKR-Orders umstellen?\n\nDas System handelt dann selbstständig mit echtem Geld (zusätzlich muss „Orders erlauben" in den IBKR-Einstellungen aktiv sein).`)) return;
+                    if (v === "ibkr" && !confirm(`„${p.name}“ auf ECHTE automatische IBKR-Orders umstellen?\n\nDas System handelt dann selbstständig mit echtem Geld (zusätzlich muss „Orders erlauben“ in den IBKR-Einstellungen aktiv sein).`)) return;
                     await api.patch(`/api/portfolios/${p.id}`, {
                       config: { ...p.config, execution: v,
                         ibkr_sync: v !== "paper" ? true : !!p.config?.ibkr_sync },
