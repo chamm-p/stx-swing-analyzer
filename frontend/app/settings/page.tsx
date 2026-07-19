@@ -39,6 +39,7 @@ export default function SettingsPage() {
       {comm && <CommSection initial={comm} onSaved={load} />}
       <JobsSection />
       <IbkrSection />
+      <FinnhubSection />
       <RedditSection />
       <PlatformsSection />
       <McpSection />
@@ -306,6 +307,64 @@ function IbkrSection() {
           )}
         </div>
       )}
+    </section>
+  );
+}
+
+/* ----------------------------------------------------------------- Finnhub */
+
+function FinnhubSection() {
+  const [key, setKey] = useState("");
+  const [hasKey, setHasKey] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get("/api/settings/finnhub").then((d) => setHasKey(!!d.has_api_key)).catch(() => {});
+  }, []);
+
+  async function save() {
+    setMsg(null);
+    try {
+      const d = await api.put("/api/settings/finnhub", { api_key: key || undefined });
+      setHasKey(!!d.has_api_key);
+      setKey("");
+      setMsg("✅ Gespeichert — Symbol-News kommen ab dem nächsten News-Sync aus Yahoo + Finnhub.");
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  async function test() {
+    setMsg("⏳ Teste (AAPL-News)…");
+    try {
+      const r = await api.post("/api/settings/finnhub/test", { api_key: key || undefined });
+      setMsg(`✅ ${r.count} AAPL-Artikel abgerufen${r.sample ? ` — z.B. „${r.sample}“` : ""}`);
+    } catch (e: any) {
+      setMsg(`❌ ${e.message}`);
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <h2 className="mb-1 font-semibold">📰 Finnhub (zweite Symbol-News-Quelle)</h2>
+      <p className="mb-3 text-xs text-slate-500">
+        Kuratierte Unternehmensnews pro US-Ticker als Ergänzung zu Yahoo — gegen das Klumpenrisiko
+        im Sentiment. Kostenloser Key auf <code>finnhub.io</code> (60 Anfragen/Min). Für .DE/.HK/Krypto
+        liefert weiter Yahoo allein.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label={`API-Key${hasKey ? " (gesetzt)" : ""}`}>
+          <input type="password" value={key} onChange={(e) => setKey(e.target.value)}
+            placeholder={hasKey ? "unverändert lassen" : ""} className={inputCls} />
+        </Field>
+        <button onClick={save} className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500">
+          Speichern
+        </button>
+        <button onClick={test} className="rounded border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:border-emerald-500">
+          Test (AAPL)
+        </button>
+        {msg && <span className="text-xs text-amber-400">{msg}</span>}
+      </div>
     </section>
   );
 }

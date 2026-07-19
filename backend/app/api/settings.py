@@ -83,6 +83,39 @@ async def put_tax(payload: TaxSettings, db: AsyncSession = Depends(get_db)):
     return await load_settings(db, "tax")
 
 
+class FinnhubSettings(BaseModel):
+    api_key: str | None = None  # leer = Bestand behalten
+
+
+@router.get("/settings/finnhub")
+async def get_finnhub(db: AsyncSession = Depends(get_db)):
+    return await public_view(db, "finnhub")
+
+
+@router.put("/settings/finnhub")
+async def put_finnhub(payload: FinnhubSettings, db: AsyncSession = Depends(get_db)):
+    await save_settings(db, "finnhub", payload.model_dump(exclude_none=True))
+    return await public_view(db, "finnhub")
+
+
+@router.post("/settings/finnhub/test")
+async def test_finnhub(payload: FinnhubSettings, db: AsyncSession = Depends(get_db)):
+    """Testabruf: AAPL-News über Finnhub."""
+    from app.services_settings import load_settings
+    from app.sources import finnhub
+
+    eff = await load_settings(db, "finnhub")
+    key = (payload.api_key or "").strip() or eff.get("api_key")
+    if not key:
+        raise HTTPException(status_code=422, detail="Kein API-Key hinterlegt")
+    try:
+        news = await finnhub.fetch_company_news("AAPL", key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Finnhub-Test fehlgeschlagen: {e}")
+    return {"ok": True, "count": len(news),
+            "sample": news[0]["title"] if news else None}
+
+
 class RedditSettings(BaseModel):
     client_id: str | None = None
     client_secret: str | None = None  # leer = Bestand behalten

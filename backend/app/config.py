@@ -118,6 +118,9 @@ class Settings(BaseSettings):
     # authentifiziert den Abruf als eigenes Konto, umgeht die Bot-Wall
     reddit_rss_token: str = ""
 
+    # Finnhub (finnhub.io) — zweite per-Symbol-News-Quelle (US-Ticker)
+    finnhub_api_key: str = ""
+
     # Steuerprofil für den eCH-0196-Steuerauszug (Schweiz)
     tax_first_name: str = ""
     tax_last_name: str = ""

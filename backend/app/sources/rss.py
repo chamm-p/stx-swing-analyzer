@@ -265,14 +265,43 @@ async def _tracked_symbols(db: AsyncSession) -> list[str]:
     return sorted({row[0] for row in wl.all()} | {row[0] for row in pos.all()})
 
 
-async def fetch_symbol_news(db: AsyncSession) -> int:
-    """Symbolbezogene Yahoo-Feeds für alle getrackten Symbole abrufen.
+async def _store_symbol_articles(db: AsyncSession, symbol: str, source_name: str,
+                                 entries: list[dict]) -> int:
+    """Symbol-Artikel (Yahoo/Finnhub) speichern; Duplikate über andere Wege
+    bekommen nur das Symbol ergänzt."""
+    total = 0
+    for e in entries:
+        title = (e.get("title") or "").strip()
+        if not title:
+            continue
+        link = e.get("url")
+        url_hash = hashlib.sha256((link or title).encode()).hexdigest()
+        existing = await db.scalar(
+            select(NewsArticle).where(NewsArticle.url_hash == url_hash).limit(1))
+        if existing:
+            if existing.symbols is None or symbol not in existing.symbols:
+                existing.symbols = (existing.symbols or []) + [symbol]
+            continue
+        db.add(NewsArticle(
+            published_at=e.get("published") or utcnow(),
+            source_name=source_name, title=title, url=link, url_hash=url_hash,
+            summary=e.get("summary"), symbols=[symbol],
+        ))
+        total += 1
+    return total
 
-    Artikel werden direkt dem Symbol zugeordnet (kein Keyword-Matching
-    nötig) — das liefert deutlich gezieltere News als die breiten Feeds.
-    """
+
+async def fetch_symbol_news(db: AsyncSession) -> int:
+    """Symbolbezogene News je getracktem Symbol — Yahoo (alle) plus Finnhub
+    (US-Ticker, wenn API-Key gesetzt). Direkt dem Symbol zugeordnet, ohne
+    Keyword-Matching — deutlich gezielter als die breiten Feeds."""
+    from app.services_settings import load_settings
+    from app.sources import finnhub
+
+    finnhub_key = (await load_settings(db, "finnhub")).get("api_key")
     total = 0
     for symbol in await _tracked_symbols(db):
+        # --- Yahoo-Symbol-Feed ---
         url = SYMBOL_FEED_URL.format(symbol=symbol)
 
         async def _get() -> bytes:
@@ -284,35 +313,23 @@ async def fetch_symbol_news(db: AsyncSession) -> int:
 
         try:
             raw = await with_retry(_get, retries=2, label=f"symbol-feed:{symbol}")
+            feed = await asyncio.to_thread(feedparser.parse, raw)
+            entries = [{
+                "title": getattr(e, "title", "") or "", "url": getattr(e, "link", None),
+                "summary": getattr(e, "summary", None), "published": _entry_published(e),
+            } for e in feed.entries[:40]]
+            total += await _store_symbol_articles(db, symbol, f"Yahoo ({symbol})", entries)
         except RuntimeError as e:
             logger.warning("Symbol-Feed %s nicht abrufbar: %s", symbol, e)
-            continue
 
-        feed = await asyncio.to_thread(feedparser.parse, raw)
-        for entry in feed.entries[:40]:
-            title = getattr(entry, "title", "") or ""
-            if not title:
-                continue
-            link = getattr(entry, "link", None)
-            url_hash = hashlib.sha256((link or title).encode()).hexdigest()
-            existing = await db.scalar(
-                select(NewsArticle).where(NewsArticle.url_hash == url_hash).limit(1)
-            )
-            if existing:
-                # Artikel kann über mehrere Wege reinkommen — Symbol ergänzen
-                if existing.symbols is None or symbol not in existing.symbols:
-                    existing.symbols = (existing.symbols or []) + [symbol]
-                continue
-            db.add(NewsArticle(
-                published_at=_entry_published(entry),
-                source_name=f"Yahoo ({symbol})",
-                title=title,
-                url=link,
-                url_hash=url_hash,
-                summary=getattr(entry, "summary", None),
-                symbols=[symbol],
-            ))
-            total += 1
+        # --- Finnhub (zweite per-Ticker-Quelle, nur US-Aktien) ---
+        if finnhub_key and finnhub.eligible(symbol):
+            try:
+                fentries = await finnhub.fetch_company_news(symbol, finnhub_key)
+                total += await _store_symbol_articles(db, symbol, f"Finnhub ({symbol})", fentries)
+            except Exception as e:
+                logger.warning("Finnhub-News %s nicht abrufbar: %s", symbol, e)
+
         await db.commit()
     if total:
         logger.info("Symbol-Feeds: %d neue Artikel", total)

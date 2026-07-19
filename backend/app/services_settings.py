@@ -72,6 +72,10 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "username": ("reddit_username", False),
         "rss_token": ("reddit_rss_token", True),
     },
+    # Finnhub — zweite per-Symbol-News-Quelle (US-Aktien)
+    "finnhub": {
+        "api_key": ("finnhub_api_key", True),
+    },
     # Steuerprofil (eCH-0196-Steuerauszug)
     "tax": {
         "first_name": ("tax_first_name", False),
