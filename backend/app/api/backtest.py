@@ -122,6 +122,11 @@ async def apply_as_challenger(run_id: uuid.UUID, payload: ApplyRequest,
 
     defaults = StrategyConfig().to_dict()
     strategy = {k: overrides.get(k, defaults[k]) for k in STRATEGY_KEYS}
+    # Strategie-Art (String, vom numerischen Filter oben nicht erfasst) und
+    # Segment 1:1 aus dem Lauf übernehmen — ein DAX-Momentum-Challenger
+    # handelt dann wirklich DAX mit Momentum-Logik.
+    strategy["strategy_kind"] = stored.get("strategy_kind") or "meanrev"
+    strategy["segment"] = run.segment or "alle"
     start_capital = float(overrides.get("start_capital", defaults["start_capital"]))
     name = (payload.name or f"Challenger {run.label or str(run.id)[:8]}")[:100]
 

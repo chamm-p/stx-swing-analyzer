@@ -41,7 +41,9 @@ DEFAULT_CONFIG = {
 STRATEGY_KEYS = ("rsi_oversold", "rsi_overbought", "rsi_scale", "macd_scale",
                  "w_rsi", "w_macd", "w_bollinger", "w_trend",
                  "threshold", "target_atr_factor", "stop_atr_factor",
-                 "horizon_days")
+                 "horizon_days",
+                 # Momentum/DTT-Parameter — für die 1:1-Übernahme aus dem Backtest
+                 "trailing_stop_atr", "regime_sma", "target_r", "breakeven_r")
 
 
 def strategy_profile(strategy: dict):
@@ -86,9 +88,52 @@ def _do_close(pf: Portfolio, p: Position, price: float, reason: str,
                 pf.name, p.symbol, price, reason, fee)
 
 
-async def _strategy_score(db: AsyncSession, symbol: str, strategy: dict) -> float | None:
-    """Technischer Score eines Symbols mit Challenger-Parametern."""
+def score_for_strategy(snapshot: dict, strategy: dict) -> float:
+    """Ein-/Ausstiegs-Score gemäß Strategie-Art (1:1 wie im Backtest):
+    momentum/dtt nutzen ihre eigenen Score-Funktionen, sonst Mean-Reversion
+    mit den Challenger-Parametern."""
+    kind = strategy.get("strategy_kind", "meanrev")
+    if kind == "momentum":
+        from app.analysis.scoring import momentum_score
+        return momentum_score(snapshot)[0]
+    if kind == "dtt":
+        from app.analysis.scoring import dtt_score
+        return dtt_score(snapshot)[0]
     from app.analysis.scoring import technical_score
+    return technical_score(snapshot, strategy_profile(strategy))[0]
+
+
+def targets_for_strategy(snapshot: dict, strategy: dict, price: float) -> dict:
+    """Ziel/Stop gemäß Strategie-Art — deckt sich mit der Backtest-Engine:
+    dtt = Swing-Low-Stop + R-Ziel, momentum = ATR-Stop ohne Fixziel
+    (Trailing), meanrev = ATR-Zielzone."""
+    from app.analysis.targets import compute_price_targets
+
+    kind = strategy.get("strategy_kind", "meanrev")
+    atr = snapshot.get("atr14")
+    if kind == "dtt":
+        swing = snapshot.get("swing_low")
+        stop = swing if (swing and swing < price) else None
+        if stop is None:
+            s50 = snapshot.get("sma50")
+            stop = s50 * 0.995 if (s50 and s50 < price) else price * 0.95
+        risk = price - stop
+        target_r = float(strategy.get("target_r", 2.0))
+        return {"target_price": round(price + target_r * risk, 4) if target_r > 0 else None,
+                "stop_price": round(stop, 4)}
+    if kind == "momentum":
+        stop_atr = float(strategy.get("stop_atr_factor", 1.5))
+        return {"target_price": None,  # Trailing-Stop, kein Fixziel
+                "stop_price": round(price - stop_atr * atr, 4) if atr else None}
+    return compute_price_targets(
+        snapshot, "BUY", int(strategy.get("horizon_days", 14)),
+        target_atr_factor=float(strategy.get("target_atr_factor", 2.0)),
+        stop_atr_factor=float(strategy.get("stop_atr_factor", 1.5))) or {}
+
+
+async def _strategy_score(db: AsyncSession, symbol: str, strategy: dict) -> float | None:
+    """Ein-/Ausstiegs-Score eines Symbols mit Challenger-Parametern
+    (Strategie-Art-bewusst)."""
     from app.processing.indicators import compute_indicators
     from app.sources.yahoo import load_ohlcv_df
 
@@ -96,8 +141,7 @@ async def _strategy_score(db: AsyncSession, symbol: str, strategy: dict) -> floa
     if df.empty or len(df) < 60:
         return None
     snapshot = compute_indicators(df)["snapshot"]
-    score, _ = technical_score(snapshot, strategy_profile(strategy))
-    return score
+    return score_for_strategy(snapshot, strategy)
 
 
 class _TradingDisabled(Exception):
@@ -145,6 +189,10 @@ async def _run_exits(db: AsyncSession, pf: Portfolio, cfg: dict,
         asset = await db.get(Asset, p.symbol)
         fee = await portfolio_fee(db, pf, asset.currency if asset else None,
                                   price * p.quantity, quantity=p.quantity)
+
+        # Trailing-Stop/Break-even (Momentum/DTT) vor der Stop-Prüfung
+        if strategy:
+            await _update_stop(db, p, strategy)
 
         # Exit-Grund ermitteln (Prioritäten)
         reason = None
@@ -196,6 +244,39 @@ async def _run_exits(db: AsyncSession, pf: Portfolio, cfg: dict,
     return closed
 
 
+async def _update_stop(db: AsyncSession, p: Position, strategy: dict) -> None:
+    """Trailing-Stop (Momentum) bzw. Break-even (DTT) nachziehen — der
+    Hochwasserstand wird aus der Kurshistorie seit Einstieg abgeleitet
+    (keine Extra-Spalte nötig). Der Stop wird nie gesenkt."""
+    kind = strategy.get("strategy_kind", "meanrev")
+    trailing = float(strategy.get("trailing_stop_atr", 0) or 0)
+    breakeven = float(strategy.get("breakeven_r", 0) or 0)
+    if kind not in ("momentum", "dtt") or (trailing <= 0 and breakeven <= 0):
+        return
+    from app.processing.indicators import atr as atr_fn
+    from app.sources.yahoo import load_ohlcv_df
+
+    df = await load_ohlcv_df(db, p.symbol, days=450)
+    if df.empty or p.entry_date is None:
+        return
+    since = df[df.index >= p.entry_date]
+    if since.empty:
+        return
+    high_water = float(since["high"].max())
+    if kind == "momentum" and trailing > 0:
+        try:
+            atr_val = float(atr_fn(df).iloc[-1])
+        except Exception:
+            return
+        trailed = high_water - trailing * atr_val
+        if p.stop_price is None or trailed > p.stop_price:
+            p.stop_price = round(trailed, 4)
+    elif kind == "dtt" and breakeven > 0 and p.stop_price and p.stop_price < p.entry_price:
+        risk = p.entry_price - p.stop_price
+        if high_water >= p.entry_price + breakeven * risk:
+            p.stop_price = round(p.entry_price, 4)  # Break-even
+
+
 async def _recently_traded(db: AsyncSession, portfolio_id: int, symbol: str) -> bool:
     cutoff = utcnow() - timedelta(days=_REENTRY_COOLDOWN_DAYS)
     row = await db.scalar(
@@ -219,26 +300,27 @@ async def _strategy_candidates(db: AsyncSession, strategy: dict) -> list[dict]:
 
     threshold = float(strategy.get("threshold", 0.35))
     horizon = int(strategy.get("horizon_days", 14))
-    profile = strategy_profile(strategy)
-    from app.analysis.scoring import technical_score
 
-    result = await db.execute(
-        select(UniverseSymbol.symbol).where(UniverseSymbol.active == True)  # noqa: E712
-    )
+    # Segment-Scope: ein DAX-Challenger handelt nur DAX (1:1 zum Backtest).
+    # "+" gruppiert (US+NASDAQ100); leer/None = ganzes Universum.
+    q = select(UniverseSymbol.symbol).where(UniverseSymbol.active == True)  # noqa: E712
+    segment = str(strategy.get("segment") or "").strip()
+    if segment and segment.lower() != "alle":
+        segs = [t for t in segment.upper().replace(" ", "+").split("+") if t]
+        q = q.where(UniverseSymbol.segment.in_(segs))
+    result = await db.execute(q)
+
     candidates: list[dict] = []
     for (symbol,) in result.all():
         df = await load_ohlcv_df(db, symbol, days=450)
         if df.empty or len(df) < 60:
             continue
         snapshot = compute_indicators(df)["snapshot"]
-        score, _ = technical_score(snapshot, profile)
+        score = score_for_strategy(snapshot, strategy)
         if score < threshold:
             continue
-        targets = compute_price_targets(
-            snapshot, "BUY", horizon,
-            target_atr_factor=float(strategy.get("target_atr_factor", 2.0)),
-            stop_atr_factor=float(strategy.get("stop_atr_factor", 1.5)),
-        ) or {}
+        price = snapshot.get("close")
+        targets = targets_for_strategy(snapshot, strategy, price) if price else {}
         candidates.append({
             "symbol": symbol, "signal_id": None, "horizon_days": horizon,
             "rank": score, "origin": "strategy",

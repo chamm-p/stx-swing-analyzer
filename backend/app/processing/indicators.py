@@ -74,6 +74,7 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     out_series["sma50"] = close.rolling(50).mean()
     out_series["sma200"] = close.rolling(200).mean()
     out_series["ema20"] = close.ewm(span=20, adjust=False).mean()
+    out_series["ema200"] = close.ewm(span=200, adjust=False).mean()
 
     def last(s: pd.Series) -> float | None:
         v = s.iloc[-1]
@@ -100,6 +101,13 @@ def compute_indicators(df: pd.DataFrame) -> dict:
         "sma20": last(out_series["sma20"]),
         "sma50": last(out_series["sma50"]),
         "sma200": last(out_series["sma200"]),
+        # Für Momentum/DTT-Challenger: Trendfilter + Vortageswerte + Swing-Low
+        "ema200": last(out_series["ema200"]),
+        "sma20_prev": (None if len(out_series["sma20"]) < 2 or pd.isna(out_series["sma20"].iloc[-2])
+                       else round(float(out_series["sma20"].iloc[-2]), 4)),
+        "sma50_prev": (None if len(out_series["sma50"]) < 2 or pd.isna(out_series["sma50"].iloc[-2])
+                       else round(float(out_series["sma50"].iloc[-2]), 4)),
+        "swing_low": round(float(df["low"].tail(10).min()), 4),
         "pct_change_5d": last(close.pct_change(5) * 100),
         "pct_change_20d": last(close.pct_change(20) * 100),
         "volume_ratio_20d": (

@@ -96,3 +96,33 @@ def test_dtt_breakeven_schuetzt_gewinn():
     # Break-even: Exit ≈ Einstieg (101), nicht der Swing-Low-Stop (99.5)
     assert tr.exit_price >= tr.entry_price * 0.99
     assert tr.pnl > -1.0  # praktisch kein Verlust
+
+
+def test_score_und_targets_pro_strategieart():
+    """Der Live-Auto-Trader wählt Scoring + Ziel/Stop passend zur
+    Strategie-Art (1:1 wie im Backtest)."""
+    from app.analysis.auto_trader import score_for_strategy, targets_for_strategy
+
+    snap = {"close": 100, "ema200": 90, "sma200": 90, "sma50": 95, "sma20": 97,
+            "sma20_prev": 94, "sma50_prev": 95, "rsi14": 58,
+            "macd_hist": 0.4, "macd_hist_prev": 0.3, "high_60d": 100,
+            "atr14": 2.0, "swing_low": 92.0, "low_60d": 90}
+
+    # DTT: Golden-Cross-Signal aktiv, Ziel = Einstieg + target_r × (Einstieg−Swing-Low)
+    dtt = {"strategy_kind": "dtt", "target_r": 2.0}
+    assert score_for_strategy(snap, dtt) == 1.0
+    t = targets_for_strategy(snap, dtt, 100)
+    assert t["stop_price"] == 92.0
+    assert t["target_price"] == 100 + 2.0 * (100 - 92.0)  # 116
+
+    # Momentum: kein Fixziel (Trailing), Stop = Kurs − stop_atr×ATR
+    mom = {"strategy_kind": "momentum", "stop_atr_factor": 1.5}
+    assert score_for_strategy(snap, mom) > 0
+    tm = targets_for_strategy(snap, mom, 100)
+    assert tm["target_price"] is None
+    assert tm["stop_price"] == 100 - 1.5 * 2.0  # 97
+
+    # Mean-Reversion: ATR-Zielzone (Ziel oberhalb, Stop unterhalb)
+    mr = {"strategy_kind": "meanrev", "target_atr_factor": 2.0, "stop_atr_factor": 1.5}
+    tr = targets_for_strategy(snap, mr, 100)
+    assert tr.get("stop_price") is not None and tr["stop_price"] < 100
