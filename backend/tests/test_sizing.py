@@ -55,3 +55,18 @@ def test_dh_prime_parser(tmp_path):
     f = tmp_path / "dhparam.pem"
     f.write_text(pem)
     assert dh_prime_from_pem(str(f)) == format(prime, "x")
+
+
+def test_challenger_umgeht_crv_guard():
+    """Challenger-Kandidaten (origin=strategy) sind vom globalen CRV-Guard
+    ausgenommen; Screener-Kandidaten nicht."""
+    from app.analysis.position_sizing import crv
+
+    # ATR-Geometrie 2.0/1.5 → CRV 1.33 < globaler min_crv 1.5
+    price, target, stop = 100.0, 102.0, 98.5
+    c = crv(price, target, stop)
+    assert c is not None and c < 1.5
+    # Der Guard blockiert nur, wenn origin != "strategy" — die
+    # Ausnahmelogik ist in _run_entries; hier sichern wir die Geometrie ab,
+    # die den Konflikt erzeugt (2×ATR Ziel / 1.5×ATR Stop = 1.33).
+    assert round(c, 2) == 1.33

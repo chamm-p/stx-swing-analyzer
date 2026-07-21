@@ -242,7 +242,74 @@ export default function PortfolioDetailPage() {
           Keine Positionen. Oben hinzufügen — oder auf der Seite <Link href="/top" className="text-sky-400 underline">Top-Signale</Link> picken.
         </p>
       )}
+
+      <TradeLog positions={detail.positions} />
     </div>
+  );
+}
+
+/** Chronologisches Handelsprotokoll: jede Position wird zu einem Kauf-
+ *  und (falls geschlossen) einem Verkauf-Ereignis, nach Datum sortiert. */
+function TradeLog({ positions }: { positions: PositionRow[] }) {
+  type Event = {
+    date: string; kind: "Kauf" | "Verkauf"; symbol: string;
+    quantity: number; price: number; fee: number; pnl: number | null;
+  };
+  const events: Event[] = [];
+  for (const p of positions) {
+    events.push({ date: p.entry_date, kind: "Kauf", symbol: p.symbol,
+      quantity: p.quantity, price: p.entry_price, fee: 0, pnl: null });
+    if (p.exit_date && p.exit_price != null) {
+      events.push({ date: p.exit_date, kind: "Verkauf", symbol: p.symbol,
+        quantity: p.quantity, price: p.exit_price, fee: p.fees, pnl: p.pnl_abs });
+    }
+  }
+  events.sort((a, b) => b.date.localeCompare(a.date));
+  if (events.length === 0) return null;
+
+  return (
+    <section>
+      <h2 className="mb-2 mt-6 text-lg font-semibold">📜 Handelsprotokoll</h2>
+      <div className="overflow-x-auto rounded-lg border border-slate-800">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-900 text-left text-slate-400">
+            <tr>
+              <th className="px-3 py-2">Zeitpunkt</th>
+              <th className="px-3 py-2">Aktion</th>
+              <th className="px-3 py-2">Symbol</th>
+              <th className="px-3 py-2 text-right">Stück</th>
+              <th className="px-3 py-2 text-right">Kurs</th>
+              <th className="px-3 py-2 text-right">Volumen</th>
+              <th className="px-3 py-2 text-right">Realisiert (netto)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.map((e, i) => (
+              <tr key={i} className="border-t border-slate-800">
+                <td className="whitespace-nowrap px-3 py-2 text-slate-400">
+                  {new Date(e.date).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </td>
+                <td className="px-3 py-2">
+                  <span className={e.kind === "Kauf" ? "text-sky-400" : "text-amber-400"}>
+                    {e.kind === "Kauf" ? "▲ Kauf" : "▼ Verkauf"}
+                  </span>
+                </td>
+                <td className="px-3 py-2 font-semibold">{e.symbol}</td>
+                <td className="px-3 py-2 text-right font-mono">{e.quantity}</td>
+                <td className="px-3 py-2 text-right font-mono">{fmtNum(e.price)}</td>
+                <td className="px-3 py-2 text-right font-mono text-slate-400">{fmtNum(e.quantity * e.price)}</td>
+                <td className={`px-3 py-2 text-right font-mono ${e.pnl == null ? "text-slate-600" : e.pnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                  {e.pnl == null ? "—" : `${e.pnl >= 0 ? "+" : ""}${fmtNum(e.pnl)}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1 text-xs text-slate-600">
+        Realisiert = Verkaufserlös − Einstand − Gebühren (bei Teilverkäufen je Scheibe).
+      </p>
+    </section>
   );
 }
 

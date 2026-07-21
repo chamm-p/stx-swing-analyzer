@@ -345,9 +345,13 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict,
                     target_price = targets["target_price"]
                     stop_price = targets["stop_price"]
 
-        # Goldene Regel: kein Kauf mit magerem Chance-Risiko-Verhältnis
+        # Goldene Regel: kein Kauf mit magerem Chance-Risiko-Verhältnis.
+        # Challenger sind ausgenommen — sie handeln bewusst ihre eigene
+        # Ziel-/Stop-Geometrie (sonst überstimmt der globale Guard die
+        # Strategie, die er testen soll).
         cand_crv = crv(price, target_price, stop_price)
-        if cand_crv is not None and cand_crv < cfg["min_crv"]:
+        if (cand.get("origin") != "strategy" and cand_crv is not None
+                and cand_crv < cfg["min_crv"]):
             logger.info("Auto-Portfolio %s: %s übersprungen (CRV %.2f < %.2f)",
                         pf.name, symbol, cand_crv, cfg["min_crv"])
             continue
