@@ -241,6 +241,15 @@ async def job_ibkr_sync() -> None:
             logger.info("IBKR-Sync: %s", stats)
 
 
+async def job_news_radar() -> None:
+    """News-Radar: nachrichten-getriebene Entdeckung nicht getrackter Werte."""
+    from app.analysis.news_radar import scan_news_radar
+
+    async with SessionLocal() as db:
+        stats = await scan_news_radar(db)
+        logger.info("News-Radar: %s", stats)
+
+
 async def job_discovery() -> None:
     """Nächtlicher Discovery-Scan über die kompletten Börsenverzeichnisse."""
     from app.alerts.ops import track_failure, track_success
@@ -299,6 +308,7 @@ JOB_FUNCS = {
     "scan_universe": job_scan_universe,
     "paper_trading": job_paper_trading,
     "discovery": job_discovery,
+    "news_radar": job_news_radar,
     "digest": job_digest,
     "ibkr_sync": job_ibkr_sync,
     "auto_optimize": job_auto_optimize,
@@ -446,6 +456,9 @@ def build_scheduler() -> AsyncIOScheduler:
     # Nachts, wenn US-Schlusskurse final sind und nichts anderes läuft
     scheduler.add_job(wrapped_job("discovery"), "cron", hour=hour, minute=minute,
                       id="discovery", max_instances=1, coalesce=True)
+    rh, rm = _parse_time(s.news_radar_time) or (7, 0)
+    scheduler.add_job(wrapped_job("news_radar"), "cron", hour=rh, minute=rm,
+                      id="news_radar", max_instances=1, coalesce=True)
     digest_times = _parse_times(s.digest_times) or [(16, 45), (21, 15)]
     scheduler.add_job(wrapped_job("digest"), _times_trigger(digest_times),
                       id="digest", max_instances=1, coalesce=True)
@@ -484,6 +497,7 @@ def build_scheduler() -> AsyncIOScheduler:
         "auto_optimize": ("days", s.optimize_interval_days),
         "refresh_universe": ("days", s.universe_refresh_days),
         "discovery": ("time", hour, minute),
+        "news_radar": ("time", rh, rm),
         "digest": ("times", tuple(digest_times)),
         "ibkr_sync": ("min", s.ibkr_sync_interval_min),
     })

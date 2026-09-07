@@ -156,6 +156,30 @@ async def trigger_discovery():
     return {"started": True}
 
 
+# ---------------------------------------------------------------- News-Radar
+
+@router.get("/news-radar")
+async def news_radar_hits():
+    """Letzte News-Radar-Treffer (durch starke News eingefangene Werte)."""
+    from app.analysis.news_radar import latest_hits
+    return {"hits": await latest_hits()}
+
+
+async def _run_radar_bg() -> None:
+    from app.analysis.news_radar import scan_news_radar
+    async with SessionLocal() as db:
+        try:
+            await scan_news_radar(db)
+        except Exception as e:
+            logger.exception("Manueller News-Radar fehlgeschlagen: %s", e)
+
+
+@router.post("/news-radar/run", status_code=202)
+async def trigger_radar():
+    asyncio.create_task(_run_radar_bg())
+    return {"started": True}
+
+
 # ---------------------------------------------------------------- Universum
 
 @router.post("/universe/refresh")

@@ -125,6 +125,16 @@ class Settings(BaseSettings):
     # http://192.168.0.10:5800). Leer = kein Link.
     app_base_url: str = ""
 
+    # News-Radar: starke News → Ticker extrahieren → Chart laden →
+    # analysieren → melden. Fängt Werte außerhalb des Universums ein.
+    news_radar_enabled: bool = True
+    news_radar_hours: int = 24            # Betrachtungsfenster der News
+    news_radar_scan_limit: int = 60       # max. Artikel je Scan an den LLM
+    news_radar_min_significance: float = 0.6   # LLM-Marktrelevanz-Schwelle
+    news_radar_min_confidence: float = 0.55    # Signal-Confidence zum Melden
+    news_radar_max_candidates: int = 8    # max. Voll-Analysen je Scan
+    news_radar_time: str = "07:00"        # täglicher Lauf (UTC)
+
     # Steuerprofil für den eCH-0196-Steuerauszug (Schweiz)
     tax_first_name: str = ""
     tax_last_name: str = ""

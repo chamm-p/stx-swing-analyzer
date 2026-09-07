@@ -27,6 +27,8 @@ JOBS: dict[str, dict] = {
                       "setting": None, "unit": "min", "fixed": 60},
     "discovery": {"label": "Discovery-Breiten-Scan (US + XETRA)",
                   "setting": "discovery_time", "unit": "time"},
+    "news_radar": {"label": "News-Radar (starke News → neue Werte einfangen)",
+                   "setting": "news_radar_time", "unit": "time"},
     "digest": {"label": "Tägliche Handelsempfehlung (Kauf + Bestands-Review)",
                "setting": "digest_times", "unit": "times"},
     "ibkr_sync": {"label": "IBKR-Bestands-Sync (verknüpfte Portfolios)",

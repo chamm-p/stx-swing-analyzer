@@ -148,6 +148,7 @@ class SchedulerSettings(BaseModel):
     optimize_segments: str | None = None
     universe_refresh_days: str | None = None
     discovery_time: str | None = None
+    news_radar_time: str | None = None
     digest_times: str | None = None
 
 
@@ -199,7 +200,7 @@ async def put_scheduler(payload: SchedulerSettings, db: AsyncSession = Depends(g
         value = value.strip()
         if value == "":
             continue  # leer = zurück auf Env-Default
-        if field in ("discovery_time", "digest_times"):
+        if field in ("discovery_time", "news_radar_time", "digest_times"):
             import re
             parts = value.split(",") if field == "digest_times" else [value]
             for part in parts:

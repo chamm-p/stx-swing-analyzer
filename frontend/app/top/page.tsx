@@ -37,6 +37,7 @@ const SEGMENTS: { key: string | null; label: string; title?: string }[] = [
   { key: "EUROSTOXX", label: "Europa", title: "Euro Stoxx 50 (ohne deutsche Werte — die stehen unter DAX)" },
   { key: "CRYPTO", label: "Top Cryptos" },
   { key: "DISCOVERY", label: "🔭 Discovery", title: "Nächtlicher Breiten-Scan über die kompletten Börsenverzeichnisse (US: NASDAQ+NYSE, DE: XETRA) — fängt Small Caps und Unbekanntes ein" },
+  { key: "NEWSRADAR", label: "📡 News-Radar", title: "Werte, die durch starke aktuelle News eingefangen wurden (außerhalb des Universums) und ein analytisches BUY/SELL-Signal ergaben" },
 ];
 
 type SortKey = "strength" | "symbol" | "segment" | "action" | "score" | "rsi" | "close";
@@ -72,7 +73,22 @@ export default function TopSignalsPage() {
   ), [segment]);
 
   const load = useCallback(() => {
-    api.get(topUrl()).then(setData).catch((e) => setError(e.message));
+    if (segment === "NEWSRADAR") {
+      api.get("/api/news-radar").then((d: any) => {
+        setData({
+          run_at: d.hits?.[0]?.ts || null, running: false,
+          results: (d.hits || []).map((h: any) => ({
+            symbol: h.symbol, name: `${h.company || ""} — ${h.event || ""}`.replace(/^ — | — $/g, ""),
+            segment: "News-Radar", action: h.action, technical_score: h.confidence ?? 0,
+            close: null, change_1d: null, change_7d: null,
+            snapshot: { target_price: h.target, stop_price: h.stop },
+            last_analysis_at: h.ts,
+          })),
+        });
+      }).catch((e) => setError(e.message));
+    } else {
+      api.get(topUrl()).then(setData).catch((e) => setError(e.message));
+    }
     api.get("/api/portfolios").then((p: PortfolioOption[]) => {
       setPortfolios(p);
       if (p.length > 0) setTargetPortfolio((cur) => cur ?? p[0].id);
@@ -99,6 +115,13 @@ export default function TopSignalsPage() {
 
   async function runScan() {
     setMsg(null);
+    if (segment === "NEWSRADAR") {
+      try {
+        await api.post("/api/news-radar/run");
+        setMsg("⏳ News-Radar läuft — analysiert starke News auf handelbare Werte (dauert 1–3 Min, LLM). Danach neu laden.");
+      } catch (e: any) { setMsg(e.message); }
+      return;
+    }
     const discovery = segment === "DISCOVERY";
     try {
       await api.post(discovery ? "/api/discovery/run" : "/api/screener/run");
@@ -252,7 +275,9 @@ export default function TopSignalsPage() {
         <p className="text-slate-500">Lade…</p>
       ) : data.results.length === 0 ? (
         <p className="text-slate-500">
-          {segment === "DISCOVERY"
+          {segment === "NEWSRADAR"
+            ? "Noch keine News-Radar-Treffer — „Scan starten“ klicken (läuft sonst täglich um 07:00 UTC). Der Radar findet Werte, die durch starke News auffielen und ein BUY/SELL-Signal ergaben."
+            : segment === "DISCOVERY"
             ? "Noch kein Discovery-Lauf vorhanden — „Scan starten“ klicken (läuft sonst automatisch jede Nacht um 02:30 UTC)."
             : "Noch kein Scan vorhanden — „Scan starten“ klicken (der Worker scannt sonst automatisch alle 6h)."}
         </p>
