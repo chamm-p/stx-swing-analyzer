@@ -27,7 +27,7 @@ export default function PortfoliosPage() {
   const [kind, setKind] = useState<"real" | "trial" | "auto">("real");
   const [platforms, setPlatforms] = useState<{ id: number; name: string }[]>([]);
   const [platformId, setPlatformId] = useState<number | "">("");
-  const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", risk_pct: "1", min_crv: "1.5", use_screener: true, execution: "paper", ibkr_sync: false });
+  const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", risk_pct: "1", min_crv: "1.5", use_screener: true, execution: "paper", ibkr_sync: false, trade_all: false });
   const [startCapital, setStartCapital] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +56,7 @@ export default function PortfoliosPage() {
           use_screener: cfg.use_screener,
           execution: cfg.execution,
           ibkr_sync: cfg.execution !== "paper" ? true : cfg.ibkr_sync,
+          trade_all: cfg.trade_all,
           enabled: true,
         };
       }
@@ -126,6 +127,12 @@ export default function PortfoliosPage() {
               <input type="checkbox" checked={cfg.use_screener}
                 onChange={(e) => setCfg({ ...cfg, use_screener: e.target.checked })} />
               Screener-Signale handeln
+            </label>
+            <label className="flex items-center gap-1 text-xs text-amber-300"
+              title="Signal-Tracker: JEDES BUY kaufen, JEDES SELL ausführen (nur für gehaltene Werte, kein Leerverkauf) — ohne Confidence-, CRV- oder Positions-Deckel. Misst die rohe Signalqualität des Gesamtsystems.">
+              <input type="checkbox" checked={cfg.trade_all}
+                onChange={(e) => setCfg({ ...cfg, trade_all: e.target.checked })} />
+              📊 Alle Signale handeln (Signal-Tracker)
             </label>
             <label className="flex flex-col text-xs text-slate-400">
               Ausführung
@@ -203,6 +210,12 @@ export default function PortfoliosPage() {
                   className="rounded border border-slate-700 px-2 py-0.5 hover:border-sky-500">
                   ⟳ jetzt
                 </button>
+              </div>
+            )}
+            {p.config?.trade_all && (
+              <div className="mt-1 text-xs text-amber-300"
+                title="Kauft jedes BUY, verkauft bei jedem SELL (nur gehaltene Werte) — ohne Deckel. Der P/L misst die rohe Signalqualität.">
+                📊 Signal-Tracker: handelt ALLE Signale
               </div>
             )}
             {p.config?.strategy && (

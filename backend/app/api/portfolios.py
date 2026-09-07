@@ -33,6 +33,10 @@ class AutoConfig(BaseModel):
     # den globalen „Orders erlauben"-Schalter)
     execution: str = Field(default="paper", pattern="^(paper|manual|ibkr)$")
     ibkr_sync: bool = False  # IBKR-Bestände in dieses Portfolio spiegeln
+    # Signal-Tracker: JEDES BUY kaufen, JEDES SELL (nur für gehaltene Werte,
+    # kein Leerverkauf) ausführen — ohne Confidence-/CRV-/Positions-Deckel.
+    # Misst die rohe Signalqualität des Gesamtsystems (inkl. News/LLM).
+    trade_all: bool = False
 
 
 class PortfolioCreate(BaseModel):

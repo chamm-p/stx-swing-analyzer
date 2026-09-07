@@ -216,6 +216,17 @@ async def _run_exits(db: AsyncSession, pf: Portfolio, cfg: dict,
                     ).order_by(desc(Signal.ts)).limit(1))
                 if sell is not None:
                     reason = "SELL-Signal"
+                elif cfg.get("trade_all"):
+                    # Signal-Tracker: auch Screener-SELL des letzten Laufs
+                    # zählt (nur für gehaltene Werte — kein Leerverkauf)
+                    from sqlalchemy import func
+                    last_run = await db.scalar(select(func.max(ScreenerResult.run_at)))
+                    if last_run is not None and last_run > p.entry_date:
+                        scr = await db.scalar(select(ScreenerResult.action).where(
+                            ScreenerResult.run_at == last_run,
+                            ScreenerResult.symbol == p.symbol))
+                        if scr == "SELL":
+                            reason = "Screener-SELL"
         if not reason:
             continue
 
@@ -380,7 +391,9 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict,
                        proposals: list | None = None) -> int:
     open_pos = await _open_positions(db, pf.id)
     held = {p.symbol for p in open_pos}
-    slots = cfg["max_positions"] - len(open_pos)
+    trade_all = bool(cfg.get("trade_all"))
+    # Signal-Tracker: kein Positions-Deckel — nur das Cash begrenzt
+    slots = 10**6 if trade_all else cfg["max_positions"] - len(open_pos)
     if slots <= 0:
         return 0
 
@@ -432,7 +445,7 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict,
         # Ziel-/Stop-Geometrie (sonst überstimmt der globale Guard die
         # Strategie, die er testen soll).
         cand_crv = crv(price, target_price, stop_price)
-        if (cand.get("origin") != "strategy" and cand_crv is not None
+        if (not trade_all and cand.get("origin") != "strategy" and cand_crv is not None
                 and cand_crv < cfg["min_crv"]):
             logger.info("Auto-Portfolio %s: %s übersprungen (CRV %.2f < %.2f)",
                         pf.name, symbol, cand_crv, cfg["min_crv"])
@@ -443,7 +456,8 @@ async def _run_entries(db: AsyncSession, pf: Portfolio, cfg: dict,
         est_quantity = budget / price
         # 1%-Regel: Stückzahl so deckeln, dass ein Ausstoppen höchstens
         # risk_pct% des Portfoliowerts kostet
-        risk_qty = risk_based_quantity(total_value, price, stop_price, cfg["risk_pct"])
+        risk_qty = (None if trade_all
+                    else risk_based_quantity(total_value, price, stop_price, cfg["risk_pct"]))
         if risk_qty is not None:
             est_quantity = min(est_quantity, risk_qty)
         # per-Share-Gebühren brauchen die Stückzahl — Näherung über die
@@ -513,6 +527,8 @@ async def run_auto_portfolios(db: AsyncSession) -> dict:
                **(pf.config or {})}
         if not cfg.get("enabled", True):
             continue
+        if cfg.get("trade_all"):
+            cfg["min_confidence"] = 0.0  # Signal-Tracker: jedes Signal zählt
         proposals: list[str] = []
         try:
             stats["closed"] += await _run_exits(db, pf, cfg, proposals)
