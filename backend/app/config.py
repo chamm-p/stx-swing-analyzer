@@ -121,6 +121,10 @@ class Settings(BaseSettings):
     # Finnhub (finnhub.io) — zweite per-Symbol-News-Quelle (US-Ticker)
     finnhub_api_key: str = ""
 
+    # Basis-URL der App für klickbare Links in Alerts (z.B.
+    # http://192.168.0.10:5800). Leer = kein Link.
+    app_base_url: str = ""
+
     # Steuerprofil für den eCH-0196-Steuerauszug (Schweiz)
     tax_first_name: str = ""
     tax_last_name: str = ""

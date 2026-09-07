@@ -214,7 +214,12 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
             and signal.confidence >= min_confidence):
         try:
             from app.services_settings import load_settings
-            await dispatch_signal_alert(signal, asset, await load_settings(db, "comm"))
+            # Die dem Signal zugrunde liegenden News mitgeben (Anlass-Prosa),
+            # relevanteste zuerst
+            top_news = sorted(articles, key=lambda a: (a.get("relevance") or 0),
+                              reverse=True)[:5] if articles else []
+            await dispatch_signal_alert(signal, asset,
+                                        await load_settings(db, "comm"), top_news)
             signal.delivered = True
             await db.commit()
         except Exception as e:

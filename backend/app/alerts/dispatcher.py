@@ -16,24 +16,58 @@ from app.models import Asset, Signal
 logger = logging.getLogger(__name__)
 
 
-def _format_message(signal: Signal, asset: Asset) -> str:
+def _fmt(v) -> str:
+    return f"{float(v):.2f}" if v is not None else "—"
+
+
+def _format_message(signal: Signal, asset: Asset, news: list[dict] | None = None) -> str:
+    """Handlungsorientierter Alert: Anlass/Prosa zuerst, News als Beleg,
+    Zahlen als kompakte Stütze, Link zum Wert."""
+    from app.config import get_settings
+
     emoji = {"BUY": "🟢", "SELL": "🔴"}.get(signal.action, "⚪")
-    target_line = ""
+    base = (get_settings().app_base_url or "").rstrip("/")
+    link = f"{base}/asset/{asset.symbol}" if base else ""
+
+    lines = [f"{emoji} {signal.action}: {asset.symbol} — {asset.name or ''}".rstrip(" —")]
+    if link:
+        lines.append(f"🔗 {link}")
+    lines.append("")
+
+    # 1) Anlass / Begründung (das „Warum" zuerst)
+    if signal.rationale:
+        lines.append(signal.rationale.strip())
+        lines.append("")
+
+    # 2) News-Anlass: die relevantesten aktuellen Schlagzeilen
+    if news:
+        lines.append("📰 Aktuelle News:")
+        for a in news[:4]:
+            tone = ("🟢" if (a.get("sentiment_score") or 0) > 0.15
+                    else "🔴" if (a.get("sentiment_score") or 0) < -0.15 else "⚪")
+            lines.append(f"  {tone} {a.get('published', '')} — {a.get('title', '')} "
+                         f"[{a.get('source', '')}]")
+        lines.append("")
+    else:
+        lines.append("📰 Keine aktuellen News gefunden — Signal rein technisch.")
+        lines.append("")
+
+    # 3) Kompakte Kennzahlen
+    lines.append(f"Kurs {_fmt(signal.price_at_signal)} · Confidence {signal.confidence:.0%} "
+                 f"· Horizont ~{signal.horizon_days} Tage")
     if signal.target_price:
-        target_line = f"Ziel: {signal.target_price} | Stop: {signal.stop_price} | CRV 1:{signal.risk_reward}"
+        tl = (f"Ziel {_fmt(signal.target_price)} · Stop {_fmt(signal.stop_price)} "
+              f"· CRV 1:{signal.risk_reward}")
         if signal.analyst_target:
-            target_line += f" | Analysten-Konsens: {signal.analyst_target}"
-        target_line += "\n"
-    return (
-        f"{emoji} {signal.action}: {asset.symbol} ({asset.name or ''})\n"
-        f"Kurs: {signal.price_at_signal} | Confidence: {signal.confidence:.0%} | "
-        f"Horizont: ~{signal.horizon_days} Tage\n"
-        f"{target_line}"
-        f"Scores — technisch {signal.technical_score:+.2f}, "
-        f"Sentiment {signal.sentiment_score:+.2f}, fundamental {signal.fundamental_score:+.2f}\n\n"
-        f"{signal.rationale or ''}\n\n"
-        f"⚠️ Automatisch generiertes Signal — keine Anlageberatung."
-    )
+            tl += f" · Analysten {_fmt(signal.analyst_target)}"
+        lines.append(tl)
+    lines.append(f"Scores: technisch {signal.technical_score:+.2f} · "
+                 f"Sentiment {_fmt(signal.sentiment_score)}"
+                 + (f" (aus {len(news)} News)" if news else " (keine News)")
+                 + f" · fundamental {_fmt(signal.fundamental_score)}")
+    lines.append("")
+    lines.append("⚠️ Automatisch generiertes Signal — keine Anlageberatung.")
+    return "\n".join(lines)
 
 
 async def send_telegram(comm: dict, text: str) -> None:
@@ -57,10 +91,12 @@ def send_email_sync(comm: dict, subject: str, body: str) -> None:
         server.send_message(msg)
 
 
-async def dispatch_signal_alert(signal: Signal, asset: Asset, comm: dict) -> None:
+async def dispatch_signal_alert(signal: Signal, asset: Asset, comm: dict,
+                                news: list[dict] | None = None) -> None:
     """Versendet über alle konfigurierten Kanäle; Fehler einzelner Kanäle
-    verhindern die anderen nicht. comm = services_settings.load_settings("comm")."""
-    text = _format_message(signal, asset)
+    verhindern die anderen nicht. comm = services_settings.load_settings("comm").
+    news = die dem Signal zugrunde liegenden Artikel (für Anlass-Prosa)."""
+    text = _format_message(signal, asset, news)
     sent = []
 
     if comm.get("telegram_bot_token") and comm.get("telegram_chat_id"):

@@ -80,8 +80,16 @@ def _match_symbols(text: str, keyword_map: dict[str, list[str]]) -> list[str]:
 
 
 async def _build_keyword_map(db: AsyncSession) -> dict[str, list[str]]:
+    """Symbol→Keywords für das News-Matching der breiten Feeds — aus
+    Watchlist UND Universum (sonst tagged eine CNBC-Meldung über einen
+    Universum-Wert diesen nie, weil er nicht in der Watchlist steht)."""
+    from app.models import UniverseSymbol
+
     result = await db.execute(
-        select(Asset).join(WatchlistItem, WatchlistItem.symbol == Asset.symbol)
+        select(Asset)
+        .join(UniverseSymbol, UniverseSymbol.symbol == Asset.symbol, isouter=True)
+        .join(WatchlistItem, WatchlistItem.symbol == Asset.symbol, isouter=True)
+        .where((UniverseSymbol.symbol.isnot(None)) | (WatchlistItem.symbol.isnot(None)))
     )
     return {a.symbol: (a.keywords or [a.symbol]) for a in result.scalars().all()}
 
