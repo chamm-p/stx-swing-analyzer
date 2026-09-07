@@ -243,8 +243,62 @@ export default function PortfolioDetailPage() {
         </p>
       )}
 
+      <OriginBreakdown id={id} refreshKey={detail.positions.length} />
       <TradeLog positions={detail.positions} />
     </div>
+  );
+}
+
+/** P/L nach Herkunft der Käufe — zeigt, WO Edge ist (Signal/LLM vs.
+ *  Screener/Technik vs. Strategie). Realisiert = netto nach Gebühren. */
+function OriginBreakdown({ id, refreshKey }: { id: string; refreshKey: number }) {
+  type Row = {
+    origin: string; label: string; closed: number; open: number;
+    win_rate: number | null; avg_pct: number | null; realized: number; unrealized: number;
+  };
+  const [rows, setRows] = useState<Row[] | null>(null);
+  useEffect(() => {
+    api.get(`/api/portfolios/${id}/breakdown`).then((d) => setRows(d.rows)).catch(() => setRows([]));
+  }, [id, refreshKey]);
+  if (!rows || rows.length === 0) return null;
+  const pnlCls = (v: number) => v > 0 ? "text-emerald-400" : v < 0 ? "text-rose-400" : "text-slate-400";
+  return (
+    <section>
+      <h2 className="mb-2 mt-6 text-lg font-semibold">🔬 Herkunft der Käufe</h2>
+      <div className="overflow-x-auto rounded-lg border border-slate-800">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-900 text-left text-slate-400">
+            <tr>
+              <th className="px-3 py-2">Herkunft</th>
+              <th className="px-3 py-2 text-right">Abgeschl.</th>
+              <th className="px-3 py-2 text-right">Offen</th>
+              <th className="px-3 py-2 text-right" title="Anteil der abgeschlossenen Trades mit Gewinn (netto)">Trefferquote</th>
+              <th className="px-3 py-2 text-right" title="Durchschnittliches Netto-P/L je abgeschlossenem Trade">Ø P/L %</th>
+              <th className="px-3 py-2 text-right">Realisiert</th>
+              <th className="px-3 py-2 text-right">Unrealisiert</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.origin} className="border-t border-slate-800">
+                <td className="px-3 py-2 font-semibold">{r.label}</td>
+                <td className="px-3 py-2 text-right font-mono">{r.closed}</td>
+                <td className="px-3 py-2 text-right font-mono text-slate-400">{r.open}</td>
+                <td className="px-3 py-2 text-right font-mono">{r.win_rate == null ? "—" : `${r.win_rate}%`}</td>
+                <td className={`px-3 py-2 text-right font-mono ${r.avg_pct == null ? "text-slate-600" : pnlCls(r.avg_pct)}`}>
+                  {r.avg_pct == null ? "—" : `${r.avg_pct > 0 ? "+" : ""}${r.avg_pct}%`}
+                </td>
+                <td className={`px-3 py-2 text-right font-mono ${pnlCls(r.realized)}`}>{r.realized >= 0 ? "+" : ""}{fmtNum(r.realized)}</td>
+                <td className={`px-3 py-2 text-right font-mono ${pnlCls(r.unrealized)}`}>{r.unrealized >= 0 ? "+" : ""}{fmtNum(r.unrealized)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1 text-xs text-slate-600">
+        Unter ~30 abgeschlossenen Trades je Zeile ist die Trefferquote statistisch noch nicht belastbar.
+      </p>
+    </section>
   );
 }
 

@@ -380,6 +380,67 @@ async def portfolio_history(portfolio_id: int, db: AsyncSession = Depends(get_db
             "benchmark_symbol": get_settings().benchmark_symbol}
 
 
+_ORIGIN_LABELS = {
+    "signal": "Signal (LLM-Analyse)",
+    "screener": "Screener (Technik)",
+    "strategy": "Strategie (Challenger)",
+    "ibkr": "IBKR (gespiegelt)",
+    "manual": "Manuell",
+}
+
+
+def _position_origin(p: Position) -> str:
+    """Herkunft eines Kaufs: aus der Auto-Trader-Notiz („Auto-Kauf (signal|
+    screener|strategy, …)") bzw. der Quelle (ibkr/manuell)."""
+    import re
+    m = re.search(r"Auto-Kauf \((signal|screener|strategy)", p.notes or "")
+    if m:
+        return m.group(1)
+    if (p.source or "").startswith("ibkr") and p.source != "ibkr_auto":
+        return "ibkr"
+    return "manual"
+
+
+@router.get("/portfolios/{portfolio_id}/breakdown")
+async def portfolio_breakdown(portfolio_id: int, db: AsyncSession = Depends(get_db)):
+    """P/L-Aufschlüsselung nach Herkunft der Käufe — beantwortet, WO Edge
+    ist: bringt die News/LLM-Schicht (Signal) etwas über die reine Technik
+    (Screener) hinaus? Realisiert = netto nach Gebühren."""
+    result = await db.execute(
+        select(Position).where(Position.portfolio_id == portfolio_id))
+    groups: dict[str, dict] = {}
+    for p in result.scalars().all():
+        g = groups.setdefault(_position_origin(p), {
+            "closed": 0, "open": 0, "wins": 0, "realized": 0.0,
+            "unrealized": 0.0, "pct_sum": 0.0})
+        cost = p.entry_price * p.quantity
+        if p.exit_date is not None and p.exit_price is not None:
+            pnl = (p.exit_price - p.entry_price) * p.quantity \
+                - (p.fee_buy or 0.0) - (p.fee_sell or 0.0)
+            g["closed"] += 1
+            g["realized"] += pnl
+            g["pct_sum"] += (pnl / cost * 100) if cost else 0.0
+            if pnl > 0:
+                g["wins"] += 1
+        else:
+            g["open"] += 1
+            current = await yahoo.latest_close(db, p.symbol)
+            if current is not None:
+                g["unrealized"] += (current - p.entry_price) * p.quantity - (p.fee_buy or 0.0)
+    rows = []
+    for origin, g in groups.items():
+        rows.append({
+            "origin": origin, "label": _ORIGIN_LABELS.get(origin, origin),
+            "closed": g["closed"], "open": g["open"],
+            "win_rate": round(g["wins"] / g["closed"] * 100, 1) if g["closed"] else None,
+            "avg_pct": round(g["pct_sum"] / g["closed"], 2) if g["closed"] else None,
+            "realized": round(g["realized"], 2),
+            "unrealized": round(g["unrealized"], 2),
+        })
+    rows.sort(key=lambda r: r["closed"] + r["open"], reverse=True)
+    return {"rows": rows}
+
+
 @router.post("/portfolios/{portfolio_id}/positions", status_code=201)
 async def add_position(portfolio_id: int, payload: PositionCreate,
                        db: AsyncSession = Depends(get_db)):
