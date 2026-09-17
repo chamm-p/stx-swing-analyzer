@@ -172,6 +172,9 @@ async def _notify(db, hits, load_settings, send_telegram, send_email_sync) -> No
         lines.append(f"{emoji} {h['action']} {h['symbol']} ({h['company']}, "
                      f"{round(h['confidence']*100)}%) — {h['event']}{link}")
     text = "\n".join(lines) + "\n\n⚠️ Kein Watchlist-Eintrag — Vorschlag; manuell prüfen."
+    from app.alerts.ops import _truthy
+    if not _truthy((await load_settings(db, "notify")).get("news_radar")):
+        return  # Kanal aus — Treffer erscheinen im Tages-Digest
     comm = await load_settings(db, "comm")
     if comm.get("telegram_bot_token") and comm.get("telegram_chat_id"):
         try:

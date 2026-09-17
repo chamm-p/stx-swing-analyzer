@@ -563,6 +563,9 @@ async def _notify_proposals(db: AsyncSession, pf: Portfolio, proposals: list[str
     text = (f"📋 Handelsvorschläge für {pf.name} (manuell):\n"
             + "\n".join(f"• {p}" for p in proposals)
             + "\n\nAusführen über den Kauf-/Verkauf-Dialog (routet zu IBKR).")
+    from app.alerts.ops import _truthy
+    if not _truthy((await load_settings(db, "notify")).get("trade_proposals")):
+        return
     comm = await load_settings(db, "comm")
     if comm.get("telegram_bot_token") and comm.get("telegram_chat_id"):
         try:

@@ -74,8 +74,20 @@ class Settings(BaseSettings):
     signal_hysteresis: float = 0.10
 
     # Tägliche Handelsempfehlung (Digest) — UTC-Zeiten, Komma-getrennt.
-    # Default: nach EU-Schluss (~16:45) und nach US-Schluss (~21:15).
-    digest_times: str = "16:45,21:15"
+    # Default: 1x nach EU-Schluss. Der Digest ist der Hauptkanal; Einzel-
+    # signale sammeln sich darin, statt sofort zu mailen.
+    digest_times: str = "17:00"
+
+    # --- Benachrichtigungs-Kanäle (einzeln schaltbar) -------------------
+    # Sofort-Mail bei JEDEM Einzelsignal. Default aus: für Swingtrading
+    # reicht der Tages-Digest, sonst wird die Kadenz unvorhersehbar.
+    notify_signal_alerts: bool = False
+    # Betriebsstörungen (Sync-/Feed-Ausfälle)
+    notify_ops_alerts: bool = True
+    # News-Radar-Treffer separat melden (sonst nur im Digest)
+    notify_news_radar: bool = False
+    # Handelsvorschläge der Auto-Portfolios im Modus "manual"
+    notify_trade_proposals: bool = True
 
     # Auto-Analyse: BUY/SELL-Treffer aus Screener & Discovery direkt voll
     # analysieren (LLM + News + Termine) — bestätigt das Signal und spart

@@ -72,6 +72,13 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "username": ("reddit_username", False),
         "rss_token": ("reddit_rss_token", True),
     },
+    # Benachrichtigungs-Kanäle (einzeln schaltbar)
+    "notify": {
+        "signal_alerts": ("notify_signal_alerts", False),
+        "ops_alerts": ("notify_ops_alerts", False),
+        "news_radar": ("notify_news_radar", False),
+        "trade_proposals": ("notify_trade_proposals", False),
+    },
     # Finnhub — zweite per-Symbol-News-Quelle (US-Aktien)
     "finnhub": {
         "api_key": ("finnhub_api_key", True),

@@ -39,6 +39,7 @@ export default function SettingsPage() {
       {comm && <CommSection initial={comm} onSaved={load} />}
       <JobsSection />
       <IbkrSection />
+      <NotifySection />
       <FinnhubSection />
       <RedditSection />
       <PlatformsSection />
@@ -307,6 +308,66 @@ function IbkrSection() {
           )}
         </div>
       )}
+    </section>
+  );
+}
+
+/* ------------------------------------------------ Benachrichtigungen */
+
+const NOTIFY_FIELDS: { key: string; label: string; hint: string }[] = [
+  { key: "signal_alerts", label: "Sofort-Mail bei jedem Einzelsignal",
+    hint: "Aus empfohlen: Signale sammeln sich im Tages-Digest. An = unvorhersehbar viele Mails." },
+  { key: "news_radar", label: "News-Radar-Treffer sofort melden",
+    hint: "Aus: Treffer erscheinen nur im Tages-Digest." },
+  { key: "trade_proposals", label: "Handelsvorschläge der Auto-Portfolios",
+    hint: "Nur für Portfolios im Modus „IBKR manuell“." },
+  { key: "ops_alerts", label: "Betriebsstörungen (Sync-/Feed-Ausfälle)",
+    hint: "Meldet, wenn Kursdaten oder Feeds wiederholt ausfallen — sonst bleibt ein Ausfall unbemerkt." },
+];
+
+function NotifySection() {
+  const [cfg, setCfg] = useState<Record<string, boolean>>({});
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get("/api/settings/notify").then((d) => {
+      const out: Record<string, boolean> = {};
+      for (const f of NOTIFY_FIELDS) out[f.key] = String(d[f.key]) === "true";
+      setCfg(out);
+    }).catch(() => {});
+  }, []);
+
+  async function toggle(key: string, value: boolean) {
+    setCfg((c) => ({ ...c, [key]: value }));
+    setMsg(null);
+    try {
+      await api.put("/api/settings/notify", { [key]: value });
+      setMsg("✅ Gespeichert");
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <h2 className="mb-1 font-semibold">🔔 Benachrichtigungen</h2>
+      <p className="mb-3 text-xs text-slate-500">
+        Welche Mails/Telegram-Nachrichten verschickt werden. Der Tages-Digest ist der
+        Hauptkanal und läuft unabhängig davon (Zeit unter „Zeitpläne“, Job „digest“).
+      </p>
+      <div className="flex flex-col gap-2">
+        {NOTIFY_FIELDS.map((f) => (
+          <label key={f.key} className="flex items-start gap-2 text-sm" title={f.hint}>
+            <input type="checkbox" className="mt-1" checked={!!cfg[f.key]}
+              onChange={(e) => toggle(f.key, e.target.checked)} />
+            <span>
+              {f.label}
+              <span className="block text-xs text-slate-500">{f.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {msg && <p className="mt-2 text-xs text-amber-400">{msg}</p>}
     </section>
   );
 }

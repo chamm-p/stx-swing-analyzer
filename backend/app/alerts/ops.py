@@ -14,10 +14,24 @@ logger = logging.getLogger(__name__)
 _DEDUPE_TTL = 86400
 
 
+def _truthy(v) -> bool:
+    """Settings-Werte kommen als String aus der DB ("true"/"false")."""
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
 async def notify_ops(db, dedupe_key: str, text: str) -> None:
     from app.alerts.dispatcher import send_email_sync, send_telegram
     from app.services_redis import get_redis
     from app.services_settings import load_settings
+
+    # Kanal im Settings-Panel abschaltbar
+    try:
+        if not _truthy((await load_settings(db, "notify")).get("ops_alerts")):
+            return
+    except Exception:
+        pass
 
     r = get_redis()
     if not await r.set(f"ops:{dedupe_key}", "1", nx=True, ex=_DEDUPE_TTL):

@@ -83,6 +83,24 @@ async def put_tax(payload: TaxSettings, db: AsyncSession = Depends(get_db)):
     return await load_settings(db, "tax")
 
 
+class NotifySettings(BaseModel):
+    signal_alerts: bool | None = None
+    ops_alerts: bool | None = None
+    news_radar: bool | None = None
+    trade_proposals: bool | None = None
+
+
+@router.get("/settings/notify")
+async def get_notify(db: AsyncSession = Depends(get_db)):
+    return await public_view(db, "notify")
+
+
+@router.put("/settings/notify")
+async def put_notify(payload: NotifySettings, db: AsyncSession = Depends(get_db)):
+    await save_settings(db, "notify", payload.model_dump(exclude_none=True))
+    return await public_view(db, "notify")
+
+
 class FinnhubSettings(BaseModel):
     api_key: str | None = None  # leer = Bestand behalten
 

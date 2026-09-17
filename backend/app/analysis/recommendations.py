@@ -227,9 +227,18 @@ async def build_digest(db: AsyncSession) -> dict:
                 "link": _link(p.symbol),
             })
 
+    # --- 4) News-Radar-Treffer (eingefangene Werte ausserhalb des Universums)
+    radar = []
+    try:
+        from app.analysis.news_radar import latest_hits
+        radar = await latest_hits()
+    except Exception as e:
+        logger.warning("Radar-Treffer für Digest nicht ladbar: %s", e)
+
     return {"ts": now.isoformat(), "reference_portfolio": ref.name if ref else None,
             "portfolio_value": round(total_value, 2) if total_value else None,
-            "buys": buys, "screener_buys": screener_buys, "reviews": reviews}
+            "buys": buys, "screener_buys": screener_buys, "reviews": reviews,
+            "radar": radar}
 
 
 def render_digest(d: dict) -> str:
@@ -267,6 +276,32 @@ def render_digest(d: dict) -> str:
             out.append(f"  🔗 {b['link']}")
         return out
 
+    # ---------------- HEUTE HANDELN (oben, nur Handlungsbedarf) ----------
+    act_sells = [r for r in d["reviews"] if r["verdict"] == "VERKAUFEN"]
+    act_buys = d["buys"][:3]
+    lines.append("")
+    lines.append("═══ 🔥 HEUTE HANDELN ═══")
+    if not act_sells and not act_buys:
+        lines.append("Kein akuter Handlungsbedarf.")
+    for r in act_sells:
+        lines.append(f"🔴 VERKAUFEN {r['symbol']} ({r['portfolio']}) "
+                     f"@ {num(r['price'])} ({r['pnl_pct']:+.1f}%) — {r['reason']}")
+        if r.get("link"):
+            lines.append(f"  🔗 {r['link']}")
+    for b in act_buys:
+        size = b.get("sizing")
+        sz = f" → {size['quantity']} Stk. (~{num(size['volume'])})" if size else ""
+        lines.append(f"🟢 KAUFEN {b['symbol']} @ {num(b.get('price'))} "
+                     f"({round((b.get('confidence') or 0) * 100)}%)"
+                     f" · Ziel {num(b.get('target'))} / Stop {num(b.get('stop'))}{sz}")
+        if b.get("why"):
+            lines.append(f"  ↳ {b['why']}")
+        if b.get("link"):
+            lines.append(f"  🔗 {b['link']}")
+
+    lines.append("")
+    lines.append("─────── weitere relevante Werte ───────")
+
     lines.append("")
     lines.append(f"🟢 Kauf-Kandidaten Watchlist ({len(d['buys'])}):")
     if d["buys"]:
@@ -279,6 +314,18 @@ def render_digest(d: dict) -> str:
         lines.append(f"🔎 Screener-Kandidaten ({len(d['screener_buys'])}):")
         for b in d["screener_buys"]:
             lines += fmt_buy(b)
+
+    if d.get("radar"):
+        lines.append("")
+        lines.append(f"📡 News-Radar — durch starke News eingefangen ({len(d['radar'])}):")
+        for h in d["radar"]:
+            icon = "🟢" if h.get("action") == "BUY" else "🔴"
+            lines.append(f"{icon} {h.get('action')} {h.get('symbol')} "
+                         f"({h.get('company')}, {round((h.get('confidence') or 0) * 100)}%) "
+                         f"— {h.get('event')}")
+            link = _link(h.get("symbol", ""))
+            if link:
+                lines.append(f"  🔗 {link}")
 
     lines.append("")
     sells = [r for r in d["reviews"] if r["verdict"] == "VERKAUFEN"]

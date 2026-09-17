@@ -28,6 +28,10 @@ from app.sources.yahoo import load_ohlcv_df
 logger = logging.getLogger(__name__)
 
 
+class _SkipAlert(Exception):
+    """Sofort-Alert-Kanal deaktiviert — kein Fehler."""
+
+
 async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
     from app.analysis.scoring import load_champion
 
@@ -214,6 +218,11 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
             and signal.confidence >= min_confidence):
         try:
             from app.services_settings import load_settings
+            # Sofort-Alerts sind standardmaessig aus — Einzelsignale
+            # sammeln sich im Tages-Digest (ruhigere Kadenz).
+            from app.alerts.ops import _truthy
+            if not _truthy((await load_settings(db, "notify")).get("signal_alerts")):
+                raise _SkipAlert()
             # Die dem Signal zugrunde liegenden News mitgeben (Anlass-Prosa),
             # relevanteste zuerst
             top_news = sorted(articles, key=lambda a: (a.get("relevance") or 0),
@@ -222,6 +231,8 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
                                         await load_settings(db, "comm"), top_news)
             signal.delivered = True
             await db.commit()
+        except _SkipAlert:
+            logger.debug("Sofort-Alert deaktiviert — %s landet im Digest", symbol)
         except Exception as e:
             logger.error("Alert-Versand für %s fehlgeschlagen: %s", symbol, e)
 
