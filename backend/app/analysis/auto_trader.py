@@ -342,6 +342,54 @@ async def _strategy_candidates(db: AsyncSession, strategy: dict) -> list[dict]:
     return candidates
 
 
+async def _resentiment_candidates(db: AsyncSession, cfg: dict,
+                                  since) -> list[dict]:
+    """Signale ohne Sentiment-Anteil neu bewerten (Forschungsmodus).
+
+    Rechnet den Composite aus den gespeicherten Teil-Scores nach — nur
+    Technik und Fundamental, mit denselben Gewichten/Schwellen wie das
+    Live-Scoring. So entstehen auch BUYs aus Signalen, die live wegen
+    negativer Nachrichtenlage auf HOLD standen."""
+    from app.analysis.scoring import effective_threshold, get_profile
+    from app.config import get_settings
+    from app.models import Asset
+
+    cfgs = get_settings()
+    result = await db.execute(
+        select(Signal).where(Signal.ts >= since,
+                             Signal.action.in_(("BUY", "HOLD")),
+                             Signal.technical_score.isnot(None))
+        .order_by(desc(Signal.ts)))
+
+    best: dict[str, dict] = {}
+    for sig in result.scalars().all():
+        parts = [(sig.technical_score, cfgs.score_weight_technical)]
+        if sig.fundamental_score is not None:
+            parts.append((sig.fundamental_score, cfgs.score_weight_fundamental))
+        tw = sum(w for _, w in parts)
+        composite = max(-1.0, min(1.0, sum(v * w for v, w in parts) / tw)) if tw else 0.0
+
+        asset = await db.get(Asset, sig.symbol)
+        asset_class = "crypto" if asset and asset.asset_type == "crypto" else "stock"
+        threshold = effective_threshold(get_profile(asset_class))
+        if composite < threshold:
+            continue
+        confidence = min(1.0, abs(composite) / max(threshold * 2, 0.01))
+        if confidence < cfg["min_confidence"]:
+            continue
+        # je Symbol nur das juengste Signal
+        if sig.symbol in best:
+            continue
+        best[sig.symbol] = {
+            "symbol": sig.symbol, "signal_id": sig.id,
+            "horizon_days": sig.horizon_days, "rank": confidence,
+            "origin": "signal",
+        }
+    out = sorted(best.values(), key=lambda c: c["rank"], reverse=True)
+    logger.info("Sentiment-neutral: %d Kandidaten neu bewertet", len(out))
+    return out
+
+
 async def _buy_candidates(db: AsyncSession, cfg: dict) -> list[dict]:
     """Kaufkandidaten: Watchlist-Signale (BUY), optional Screener-BUYs.
 
@@ -350,6 +398,14 @@ async def _buy_candidates(db: AsyncSession, cfg: dict) -> list[dict]:
         return await _strategy_candidates(db, cfg["strategy"])
 
     since = utcnow() - timedelta(hours=_ENTRY_WINDOW_HOURS)
+    if not cfg.get("use_sentiment", True):
+        # Sentiment-neutraler Tracker: Signale aus den gespeicherten
+        # Teil-Scores NEU bewerten, ohne Sentiment. Noetig, weil die
+        # Signal-Tabelle bereits sentiment-gefiltert ist — negatives
+        # Sentiment verhindert das BUY, wodurch genau die Gegenprobe
+        # fehlt, die wir messen wollen. HOLDs werden mitbetrachtet.
+        return await _resentiment_candidates(db, cfg, since)
+
     result = await db.execute(
         select(Signal).where(
             Signal.action == "BUY", Signal.ts >= since,

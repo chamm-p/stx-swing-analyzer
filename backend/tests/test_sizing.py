@@ -70,3 +70,23 @@ def test_challenger_umgeht_crv_guard():
     # Ausnahmelogik ist in _run_entries; hier sichern wir die Geometrie ab,
     # die den Konflikt erzeugt (2×ATR Ziel / 1.5×ATR Stop = 1.33).
     assert round(c, 2) == 1.33
+
+
+def test_resentiment_composite_ohne_sentiment():
+    """Die Neubewertung im Forschungsmodus nutzt nur Technik+Fundamental
+    mit den Live-Gewichten — ein Signal, das live wegen negativem
+    Sentiment HOLD war, kann so ueber die Schwelle kommen."""
+    from app.config import get_settings
+    s = get_settings()
+
+    tech, fund = 0.50, 0.20
+    parts = [(tech, s.score_weight_technical), (fund, s.score_weight_fundamental)]
+    tw = sum(w for _, w in parts)
+    composite = sum(v * w for v, w in parts) / tw
+    assert composite > 0.35  # waere ein BUY
+
+    # Mit stark negativem Sentiment haette es die Schwelle gerissen
+    parts_mit = parts + [(-0.8, s.score_weight_sentiment)]
+    tw2 = sum(w for _, w in parts_mit)
+    composite_mit = sum(v * w for v, w in parts_mit) / tw2
+    assert composite_mit < composite

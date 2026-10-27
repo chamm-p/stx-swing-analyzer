@@ -27,7 +27,7 @@ export default function PortfoliosPage() {
   const [kind, setKind] = useState<"real" | "trial" | "auto">("real");
   const [platforms, setPlatforms] = useState<{ id: number; name: string }[]>([]);
   const [platformId, setPlatformId] = useState<number | "">("");
-  const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", risk_pct: "1", min_crv: "1.5", use_screener: true, execution: "paper", ibkr_sync: false, trade_all: false });
+  const [cfg, setCfg] = useState({ start_capital: "10000", max_per_trade: "1000", max_positions: "10", min_confidence: "0.5", risk_pct: "1", min_crv: "1.5", use_screener: true, execution: "paper", ibkr_sync: false, trade_all: false, use_sentiment: true });
   const [startCapital, setStartCapital] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +57,7 @@ export default function PortfoliosPage() {
           execution: cfg.execution,
           ibkr_sync: cfg.execution !== "paper" ? true : cfg.ibkr_sync,
           trade_all: cfg.trade_all,
+          use_sentiment: cfg.use_sentiment,
           enabled: true,
         };
       }
@@ -133,6 +134,12 @@ export default function PortfoliosPage() {
               <input type="checkbox" checked={cfg.trade_all}
                 onChange={(e) => setCfg({ ...cfg, trade_all: e.target.checked })} />
               📊 Alle Signale handeln (Signal-Tracker)
+            </label>
+            <label className="flex items-center gap-1 text-xs text-violet-300"
+              title="Forschungsmodus: Sentiment wird NICHT ins Signal eingerechnet. Signale werden aus Technik und Fundamental neu bewertet — so werden auch Werte mit negativer Nachrichtenlage gekauft. Nur so lässt sich messen, ob News überhaupt nützen.">
+              <input type="checkbox" checked={!cfg.use_sentiment}
+                onChange={(e) => setCfg({ ...cfg, use_sentiment: !e.target.checked })} />
+              🧪 Ohne Sentiment rechnen (Gegenprobe)
             </label>
             <label className="flex flex-col text-xs text-slate-400">
               Ausführung
@@ -216,6 +223,12 @@ export default function PortfoliosPage() {
               <div className="mt-1 text-xs text-amber-300"
                 title="Kauft jedes BUY, verkauft bei jedem SELL (nur gehaltene Werte) — ohne Deckel. Der P/L misst die rohe Signalqualität.">
                 📊 Signal-Tracker: handelt ALLE Signale
+              </div>
+            )}
+            {p.config?.use_sentiment === false && (
+              <div className="mt-1 text-xs text-violet-300"
+                title="Sentiment wird nicht gewertet — Vergleichsgruppe zur Messung der News-Wirkung.">
+                🧪 Forschungsmodus: ohne Sentiment
               </div>
             )}
             {p.config?.strategy && (

@@ -37,6 +37,11 @@ class AutoConfig(BaseModel):
     # kein Leerverkauf) ausführen — ohne Confidence-/CRV-/Positions-Deckel.
     # Misst die rohe Signalqualität des Gesamtsystems (inkl. News/LLM).
     trade_all: bool = False
+    # Forschungsmodus: Sentiment NICHT ins Signal einrechnen. Signale
+    # werden aus den gespeicherten Teil-Scores neu bewertet, damit auch
+    # Werte mit negativer Nachrichtenlage gekauft werden — sonst fehlt
+    # die Gegenprobe (Live-Messung: Sentiment korrelierte -0.21).
+    use_sentiment: bool = True
 
 
 class PortfolioCreate(BaseModel):
