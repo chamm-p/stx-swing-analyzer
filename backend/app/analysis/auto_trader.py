@@ -364,7 +364,12 @@ async def _resentiment_candidates(db: AsyncSession, cfg: dict,
     best: dict[str, dict] = {}
     for sig in result.scalars().all():
         parts = [(sig.technical_score, cfgs.score_weight_technical)]
-        if sig.fundamental_score is not None:
+        # Eine gespeicherte 0.0 ohne Nachrichtenbasis ist "keine
+        # Information", nicht "neutral bewertet" — sie als echten Wert zu
+        # fuehren wuerde den Composite im Nenner stauchen (0.479 -> 0.342)
+        # und genau die Kandidaten verschlucken, die wir messen wollen.
+        if sig.fundamental_score is not None and not (
+                sig.fundamental_score == 0.0 and sig.sentiment_score is None):
             parts.append((sig.fundamental_score, cfgs.score_weight_fundamental))
         tw = sum(w for _, w in parts)
         composite = max(-1.0, min(1.0, sum(v * w for v, w in parts) / tw)) if tw else 0.0
