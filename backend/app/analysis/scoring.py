@@ -182,7 +182,8 @@ def effective_threshold(profile: ScoringProfile) -> float:
 
 def score_signal(indicator_snapshot: dict, sentiment: float | None,
                  fundamental: float | None,
-                 asset_class: str = "stock") -> ScoringResult:
+                 asset_class: str = "stock",
+                 use_sentiment: bool = True) -> ScoringResult:
     """Composite-Score mit verfügbarkeitsbasierter Gewichtung.
 
     sentiment/fundamental = None heißt „nicht verfügbar" (z.B. keine
@@ -196,7 +197,10 @@ def score_signal(indicator_snapshot: dict, sentiment: float | None,
     threshold = effective_threshold(profile)
 
     parts: list[tuple[float, float]] = [(tech, s.score_weight_technical)]
-    if sentiment is not None:
+    # use_sentiment=False: Sentiment wird NUR protokolliert, nicht gewertet.
+    # Noetig fuer die unverzerrte Messung — solange negatives Sentiment den
+    # Kauf verhindert, sehen wir nie, wie solche Einstiege gelaufen waeren.
+    if sentiment is not None and use_sentiment:
         parts.append((sentiment, s.score_weight_sentiment))
     if fundamental is not None:
         parts.append((fundamental, s.score_weight_fundamental))
@@ -214,7 +218,7 @@ def score_signal(indicator_snapshot: dict, sentiment: float | None,
     # Confidence: Stärke des Composite, mit Bonus wenn alle Teil-Scores
     # in dieselbe Richtung zeigen (Agreement).
     confidence = min(1.0, abs(composite) / max(threshold * 2, 0.01))
-    directions = [v for v in (tech, sentiment, fundamental)
+    directions = [v for v in (tech, sentiment if use_sentiment else None, fundamental)
                   if v is not None and abs(v) > 0.1]
     if len(directions) >= 2 and (all(d > 0 for d in directions) or all(d < 0 for d in directions)):
         confidence = min(1.0, confidence + 0.15)

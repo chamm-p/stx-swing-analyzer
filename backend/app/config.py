@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     score_weight_sentiment: float = 0.3
     score_weight_fundamental: float = 0.2
     score_threshold: float = 0.35
+    # Sentiment ins Composite einrechnen. False = nur protokollieren.
+    # Hintergrund: Live-Messung (Portfolio 14, 58 Trades) ergab eine
+    # NEGATIVE Korrelation (-0.21) von Sentiment zum Ergebnis, und weil
+    # negatives Sentiment den Kauf blockiert, fehlt die Gegenprobe.
+    score_use_sentiment: bool = True
     # Höhere Schwelle für Krypto — mehr Grundrauschen im 24/7-Markt
     score_threshold_crypto: float = 0.45
     # Hysterese gegen Signal-Flattern: Ein bestehendes BUY/SELL kippt erst

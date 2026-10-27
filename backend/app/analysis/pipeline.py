@@ -32,7 +32,8 @@ class _SkipAlert(Exception):
     """Sofort-Alert-Kanal deaktiviert — kein Fehler."""
 
 
-async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
+async def run_for_symbol(db: AsyncSession, symbol: str,
+                         use_sentiment: bool | None = None) -> Signal | None:
     from app.analysis.scoring import load_champion
 
     settings = get_settings()
@@ -114,7 +115,19 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
 
     # 3) Regelbasiertes Scoring (Profil nach Asset-Klasse: stock/crypto)
     asset_class = "crypto" if asset.asset_type == "crypto" else "stock"
-    result = score_signal(snapshot, sentiment, fundamental, asset_class=asset_class)
+    if use_sentiment is None:
+        use_sentiment = settings.score_use_sentiment
+    result = score_signal(snapshot, sentiment, fundamental, asset_class=asset_class,
+                          use_sentiment=use_sentiment)
+
+    # News-Reaktion messen (nur protokollieren, nicht werten): Ist die
+    # Nachricht schon im Kurs? Siehe news_reaction.py.
+    reaction = None
+    try:
+        from app.analysis.news_reaction import news_reaction
+        reaction = await news_reaction(db, symbol, articles, snapshot.get("close"))
+    except Exception as e:
+        logger.warning("News-Reaktion %s fehlgeschlagen: %s", symbol, e)
 
     # 4) Signal-Erzeugung (Dedupe + Hysterese gegen Flattern)
     last = await db.scalar(
@@ -198,7 +211,10 @@ async def run_for_symbol(db: AsyncSession, symbol: str) -> Signal | None:
         fundamental_score=result.fundamental,
         rationale=" — ".join(rationale_parts),
         horizon_days=horizon_days,
-        indicators=snapshot,
+        # Messdaten mitschreiben: News-Reaktion + ob Sentiment gewertet
+        # wurde (fuer die unverzerrte Auswertung spaeter)
+        indicators={**snapshot, "news_reaction": reaction,
+                    "sentiment_used": use_sentiment},
         price_at_signal=snapshot.get("close"),
         target_price=targets.get("target_price"),
         stop_price=targets.get("stop_price"),

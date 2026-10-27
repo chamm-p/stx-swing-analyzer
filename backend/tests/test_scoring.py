@@ -159,3 +159,24 @@ class TestFlipSuppressed:
 
     def test_ohne_vorsignal_nie_unterdrueckt(self):
         assert not flip_suppressed(None, "HOLD", composite=0.30, threshold=0.35, hysteresis=0.10)
+
+
+def test_sentiment_kann_ausgeklammert_werden():
+    """use_sentiment=False: Sentiment wird NICHT gewertet — noetig fuer die
+    unverzerrte Messung (negatives Sentiment blockiert sonst den Kauf,
+    wodurch die Gegenprobe systematisch fehlt)."""
+    from app.analysis.scoring import score_signal
+
+    snap = {"close": 100, "rsi14": 32, "sma20": 101, "sma50": 103, "sma200": 95,
+            "bb_upper": 108, "bb_lower": 96, "bb_mid": 102, "atr14": 2.0,
+            "macd": 0.2, "macd_signal": 0.1, "macd_hist": 0.1,
+            "macd_hist_prev": 0.05, "high_60d": 110, "low_60d": 92}
+
+    # Stark negatives Sentiment zieht den Composite normalerweise runter
+    mit = score_signal(snap, -0.9, None, use_sentiment=True)
+    ohne = score_signal(snap, -0.9, None, use_sentiment=False)
+    assert ohne.composite > mit.composite
+
+    # Ausgeklammert zaehlt nur die Technik
+    nur_tech = score_signal(snap, None, None)
+    assert abs(ohne.composite - nur_tech.composite) < 1e-9
