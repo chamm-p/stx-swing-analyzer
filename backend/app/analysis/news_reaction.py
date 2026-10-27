@@ -32,13 +32,20 @@ async def news_reaction(db, symbol: str, articles: list[dict],
     # relevanteste frische Nachricht
     top = max(fresh, key=lambda a: (a.get("relevance") or 0, -(a.get("age_days") or 0)))
 
+    from datetime import date as _date
+
     from sqlalchemy import text
+    try:
+        # asyncpg braucht ein echtes date-Objekt, keinen ISO-String
+        published = _date.fromisoformat(str(top["published"])[:10])
+    except (ValueError, TypeError):
+        return None
     try:
         row = (await db.execute(text("""
             SELECT close FROM ohlcv
             WHERE symbol = :s AND ts::date <= :d
             ORDER BY ts DESC LIMIT 1
-        """), {"s": symbol, "d": top["published"]})).first()
+        """), {"s": symbol, "d": published})).first()
     except Exception as e:
         logger.warning("News-Reaktion %s nicht berechenbar: %s", symbol, e)
         return None
