@@ -104,6 +104,7 @@ export default function BuyDialog({ symbol, defaultPortfolioId, targetPrice, sto
     setError(null);
     try {
       let entryPrice: number | null = priceInput.trim() ? price : null;
+      let bookedQty = quantity;
       let ibkrNote = "";
       if (routeIbkr) {
         // Echte Order zuerst — nur bei Erfolg wird die Position gebucht.
@@ -116,17 +117,21 @@ export default function BuyDialog({ symbol, defaultPortfolioId, targetPrice, sto
           confirm: true,
         });
         if (order.avg_fill_price) entryPrice = order.avg_fill_price;
+        // IBKR rundet Bruchteile — die TATSAECHLICH ausgefuehrte Menge
+        // buchen, sonst weicht der App-Bestand vom Depot ab
+        if (order.filled && order.filled > 0) bookedQty = order.filled;
         ibkrNote = ` · IBKR ${order.status}` +
+          (order.filled && order.filled !== quantity ? ` (${order.filled} statt ${quantity} ausgeführt)` : "") +
           (order.avg_fill_price ? ` @ ${order.avg_fill_price}` : "") +
           (order.commission ? `, Kommission ${order.commission}` : "") +
           (order.bracket_orders ? `, ${order.bracket_orders} Bracket-Exits` : "");
       }
       const res = await api.post(`/api/portfolios/${portfolioId}/positions`, {
         symbol,
-        quantity,
+        quantity: bookedQty,
         entry_price: entryPrice,
       });
-      onBought(`✅ ${quantity} × ${symbol} gekauft zu ${res.entry_price}` +
+      onBought(`✅ ${bookedQty} × ${symbol} gekauft zu ${res.entry_price}` +
         (res.fee ? ` (+ ${res.fee} Gebühr)` : "") + ` → ${portfolio?.name}` + ibkrNote);
       onClose();
     } catch (e: any) {

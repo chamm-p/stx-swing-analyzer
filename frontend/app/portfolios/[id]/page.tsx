@@ -76,7 +76,7 @@ export default function PortfolioDetailPage() {
       String(p.quantity)
     );
     if (qtyInput === null) return;
-    const qty = parseFloat(qtyInput.replace(",", "."));
+    let qty = parseFloat(qtyInput.replace(",", "."));
     if (!qty || qty <= 0) return;
     const px = window.prompt(`Verkaufskurs für ${p.symbol} (leer = aktueller Kurs ${p.current_price ?? "?"})`, "");
     if (px === null) return;
@@ -95,7 +95,11 @@ export default function PortfolioDetailPage() {
           order_type: "MKT", confirm: true,
         });
         if (order.avg_fill_price) exitPrice = order.avg_fill_price;
-        ibkrNote = ` · IBKR ${order.status}` +
+        // tatsaechlich ausgefuehrte Menge verkaufen (IBKR rundet Bruchteile)
+        const abweichung = order.filled && order.filled !== qty
+          ? ` (${order.filled} statt ${qty} ausgeführt)` : "";
+        if (order.filled && order.filled > 0) qty = order.filled;
+        ibkrNote = ` · IBKR ${order.status}` + abweichung +
           (order.avg_fill_price ? ` @ ${order.avg_fill_price}` : "") +
           (order.commission ? `, Kommission ${order.commission}` : "");
       } catch (err: any) {
