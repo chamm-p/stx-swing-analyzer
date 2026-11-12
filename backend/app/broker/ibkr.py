@@ -202,10 +202,28 @@ def _conid_for(client, symbol: str, currency: str | None) -> int:
 # Standard-Bestätigungsfragen, die wir bewusst durchwinken — alles
 # Informations-Prompts; ohne Echtzeit-Marktdaten-Abo fragt IBKR z.B.
 # bei jeder Order nach (MISSING_MARKET_DATA).
+# Rueckfragen, die ibind's QuestionType (0.1.23) nicht kennt. find_answer
+# vergleicht per Teilstring, daher genuegen hier blosse Textfragmente.
+# Fehlt eine Rueckfrage, bricht ibind mit "No answer found for question"
+# ab und die Order wird NIE platziert — genau so scheiterte der erste
+# NVDA-Kauf an der Market-Order-Bestaetigung.
+_EXTRA_CONFIRMATIONS = (
+    "Market Order Confirmation",
+    "A Market Order is an instruction to trade your order at any available price",
+    "Order Value Limit",
+    "exceeds the Total Value Limit of",
+    "size exceeds the Size Limit of",
+    "This order will be distributed over multiple accounts",
+    "Would you like to cancel all open orders",
+    "non-guaranteed",
+    "You are submitting an order without market data",
+)
+
+
 def _default_answers() -> dict:
     from ibind.client.ibkr_utils import QuestionType
 
-    return {
+    answers = {
         QuestionType.PRICE_PERCENTAGE_CONSTRAINT: True,
         QuestionType.MISSING_MARKET_DATA: True,
         QuestionType.TRIGGER_AND_FILL: True,
@@ -214,6 +232,17 @@ def _default_answers() -> dict:
         QuestionType.DISRUPTIVE_ORDERS: True,
         QuestionType.MANDATORY_CAP_PRICE: True,
     }
+    # Weitere QuestionTypes der installierten ibind-Version automatisch
+    # mitnehmen, damit ein Update nicht wieder Orders scheitern laesst
+    for name in dir(QuestionType):
+        if name.startswith("_"):
+            continue
+        value = getattr(QuestionType, name)
+        if isinstance(value, str) or hasattr(value, "value"):
+            answers.setdefault(value, True)
+    for text in _EXTRA_CONFIRMATIONS:
+        answers.setdefault(text, True)
+    return answers
 
 
 async def place_order(db: AsyncSession, symbol: str, side: str, quantity: float,

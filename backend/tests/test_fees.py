@@ -74,3 +74,23 @@ def test_ibkr_default_spiegelt_usd():
     assert compute_fee(_IBKR_FIXED, "GBP", 5000, quantity=100) == \
         compute_fee(_IBKR_FIXED, "USD", 5000, quantity=100)
     assert compute_fee(_IBKR_TIERED, None, 50000, quantity=1000) == 3.5
+
+
+def test_ibkr_beantwortet_market_order_bestaetigung():
+    """Regression: Die Market-Order-Bestaetigung kennt ibind's QuestionType
+    nicht — ohne eigene Antwort bricht find_answer ab und die Order wird
+    NIE platziert (so scheiterte der erste NVDA-Kauf)."""
+    from ibind.client.ibkr_utils import find_answer
+
+    from app.broker.ibkr import _default_answers
+
+    frage = (
+        "<h4>Market Order Confirmation</h4>&nbsp;&nbsp;&nbsp;A Market Order is "
+        "an instruction to trade your order at any available price and presents "
+        "significant risk of trading at an undesirable price."
+    )
+    assert find_answer(frage, _default_answers()) is True
+
+    # Die bisherigen Rueckfragen funktionieren weiterhin
+    assert find_answer(
+        "You are submitting an order without market data.", _default_answers()) is True
