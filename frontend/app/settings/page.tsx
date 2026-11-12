@@ -218,6 +218,7 @@ function IbkrSection() {
         access_token: String(cfg!.access_token ?? ""),
         access_token_secret: cfg!.access_token_secret || undefined,
         trading_enabled: String(cfg!.trading_enabled ?? "false"),
+        cash_warn_below: String(cfg!.cash_warn_below ?? "0"),
       });
       setCfg({ ...saved, access_token_secret: "" });
       setMsg("✅ Gespeichert.");
@@ -271,6 +272,8 @@ function IbkrSection() {
             className={inputCls} />
         </Field>
         {field("account", "Konto-ID (optional)", "z.B. U1234567 bzw. DU… für Paper; leer = erstes Konto")}
+        {field("cash_warn_below", "Cash-Warnschwelle",
+               "Warnt, wenn das Konto-Cash darunter fällt (Kontowährung). 0 = aus. Einzahlungen kann die App nicht auslösen.")}
         <label className="flex items-center gap-2 self-end pb-2 text-xs"
           title="Ohne Haken ist die Verbindung faktisch read-only — kein Endpoint kann Orders senden">
           <input type="checkbox" checked={tradingOn}
@@ -321,6 +324,8 @@ const NOTIFY_FIELDS: { key: string; label: string; hint: string }[] = [
     hint: "Aus: Treffer erscheinen nur im Tages-Digest." },
   { key: "trade_proposals", label: "Handelsvorschläge der Auto-Portfolios",
     hint: "Nur für Portfolios im Modus „IBKR manuell“." },
+  { key: "ibkr_cash", label: "IBKR-Cash niedrig",
+    hint: "Warnt, wenn das Konto-Cash unter die Schwelle fällt. Einzahlungen kann die App nicht auslösen — die Erinnerung verweist aufs Client Portal." },
   { key: "ops_alerts", label: "Betriebsstörungen (Sync-/Feed-Ausfälle)",
     hint: "Meldet, wenn Kursdaten oder Feeds wiederholt ausfallen — sonst bleibt ein Ausfall unbemerkt." },
 ];

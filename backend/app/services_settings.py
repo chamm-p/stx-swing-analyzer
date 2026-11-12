@@ -78,6 +78,7 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "ops_alerts": ("notify_ops_alerts", False),
         "news_radar": ("notify_news_radar", False),
         "trade_proposals": ("notify_trade_proposals", False),
+        "ibkr_cash": ("notify_ibkr_cash", False),
     },
     # Finnhub — zweite per-Symbol-News-Quelle (US-Aktien)
     "finnhub": {
@@ -97,6 +98,7 @@ SCHEMAS: dict[str, dict[str, tuple[str, bool]]] = {
         "consumer_key": ("ibkr_consumer_key", False),
         "access_token": ("ibkr_access_token", False),
         "access_token_secret": ("ibkr_access_token_secret", True),
+        "cash_warn_below": ("ibkr_cash_warn_below", False),
     },
     # Job-Intervalle — der Worker-Tick gleicht laufend mit dem APScheduler
     # ab (Änderungen greifen ohne Neustart, ≤ 20s)

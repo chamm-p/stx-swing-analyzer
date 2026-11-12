@@ -23,6 +23,7 @@ class IbkrSettings(BaseModel):
     access_token: str | None = None
     access_token_secret: str | None = None  # leer = Bestand behalten
     trading_enabled: str | None = None  # "true"/"false"
+    cash_warn_below: str | None = None  # Warnschwelle fuer das Konto-Cash
 
 
 class OrderRequest(BaseModel):

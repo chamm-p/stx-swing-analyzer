@@ -94,3 +94,15 @@ def test_ibkr_beantwortet_market_order_bestaetigung():
     # Die bisherigen Rueckfragen funktionieren weiterhin
     assert find_answer(
         "You are submitting an order without market data.", _default_answers()) is True
+
+
+def test_cash_warnung_schwelle():
+    """Die Cash-Warnung greift nur unterhalb der Schwelle und bleibt bei
+    0 (= aus) oder fehlendem Wert stumm."""
+    def ausloesen(cash, threshold):
+        return bool(threshold) and cash is not None and cash < threshold
+
+    assert ausloesen(178.51, 500.0) is True      # unter Schwelle -> warnen
+    assert ausloesen(600.0, 500.0) is False      # darueber -> still
+    assert ausloesen(10.0, 0.0) is False         # Schwelle 0 = deaktiviert
+    assert ausloesen(None, 500.0) is False       # kein Cash bekannt

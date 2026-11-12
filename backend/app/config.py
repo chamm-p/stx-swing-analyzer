@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     notify_news_radar: bool = False
     # Handelsvorschläge der Auto-Portfolios im Modus "manual"
     notify_trade_proposals: bool = True
+    # Warnung bei niedrigem IBKR-Cash
+    notify_ibkr_cash: bool = True
 
     # Auto-Analyse: BUY/SELL-Treffer aus Screener & Discovery direkt voll
     # analysieren (LLM + News + Termine) — bestätigt das Signal und spart
@@ -120,6 +122,11 @@ class Settings(BaseSettings):
     ibkr_access_token_secret: str = ""
     ibkr_keys_dir: str = "/srv/ibkr_keys"
     ibkr_sync_interval_min: int = 60    # Bestands-Sync verknüpfter Portfolios
+    # Warnung, wenn das IBKR-Cash unter diesen Betrag faellt (Kontowaehrung).
+    # Einzahlungen kann die App nicht ausloesen (die Web-API bietet keine
+    # Transfers) — die Warnung erinnert rechtzeitig daran, im Client
+    # Portal nachzulegen. 0 = aus.
+    ibkr_cash_warn_below: float = 0.0
 
     # Reddit-API (reddit.com/prefs/apps, Typ "script") — Reddit filtert
     # RSS-Auto-Abrufe; mit Credentials laufen r/-Quellen über OAuth

@@ -121,4 +121,52 @@ async def sync_ibkr_portfolios(db: AsyncSession) -> dict:
         for k in ("added", "updated", "closed"):
             totals[k] += stats[k]
         logger.info("IBKR-Sync %s: %s", pf.name, stats)
+    await _check_cash(db, state.get("cash"))
     return totals
+
+
+async def _check_cash(db: AsyncSession, cash: float | None) -> None:
+    """Warnen, wenn das IBKR-Cash unter den Schwellwert faellt.
+
+    Einzahlungen kann die App nicht ausloesen — die Client Portal Web API
+    bietet keine Transfers. Die Warnung erinnert rechtzeitig daran, im
+    Client Portal nachzulegen. Dedupe: hoechstens eine Meldung je 24h."""
+    import asyncio
+
+    from app.alerts.dispatcher import send_email_sync, send_telegram
+    from app.alerts.ops import _truthy
+    from app.config import get_settings
+    from app.services_redis import get_redis
+    from app.services_settings import load_settings
+
+    threshold = get_settings().ibkr_cash_warn_below
+    if not threshold or cash is None or cash >= threshold:
+        return
+    try:
+        if not _truthy((await load_settings(db, "notify")).get("ibkr_cash")):
+            return
+    except Exception:
+        return
+
+    r = get_redis()
+    if not await r.set("ibkr:cash_warn", "1", nx=True, ex=86400):
+        return  # innerhalb 24h schon gemeldet
+
+    text = (f"💰 IBKR-Cash niedrig: {cash:.2f} (Schwelle {threshold:.2f})\n\n"
+            f"Einzahlungen lassen sich nicht aus der App ausloesen — die "
+            f"IBKR-Web-API bietet keine Transfers. Bitte im Client Portal "
+            f"unter „Transfer & Pay“ nachlegen (ein Dauerauftrag erspart "
+            f"die wiederholte Avisierung).")
+    logger.warning("IBKR-Cash unter Schwelle: %.2f < %.2f", cash, threshold)
+    comm = await load_settings(db, "comm")
+    if comm.get("telegram_bot_token") and comm.get("telegram_chat_id"):
+        try:
+            await send_telegram(comm, text)
+        except Exception as e:
+            logger.error("Cash-Warnung Telegram fehlgeschlagen: %s", e)
+    if comm.get("smtp_host") and comm.get("alert_email_to"):
+        try:
+            await asyncio.to_thread(send_email_sync, comm,
+                                    "[stx] IBKR-Cash niedrig", text)
+        except Exception as e:
+            logger.error("Cash-Warnung E-Mail fehlgeschlagen: %s", e)
